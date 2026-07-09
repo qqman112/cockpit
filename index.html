@@ -124,23 +124,29 @@ function compute(){
 }
 
 // ══════════ 自動抓取 ══════════
+async function tryFetch(u){const r=await fetch(u,{cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);return r.json();}
+async function getJSON(u,log){
+ try{log.push("直連");return await tryFetch(u);}
+ catch(e1){log.push("直連失敗("+(e1.message||"blocked")+")→代理1");
+  try{return await tryFetch("https://api.allorigins.win/raw?url="+encodeURIComponent(u));}
+  catch(e2){log.push("代理1失敗→代理2");
+   return await tryFetch("https://corsproxy.io/?url="+encodeURIComponent(u));}}}
 async function autoFetch(){
- const el=document.getElementById("fmsg");el.textContent="抓取中…";el.className="msg warn";
+ const el=document.getElementById("fmsg");el.textContent="抓取中…（直連→代理1→代理2 三通道嘗試，最久約20秒）";el.className="msg warn";
+ const log=[];
  try{
-  const [sR,iR]=await Promise.all([
-   fetch("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"),
-   fetch("https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK")]);
-  const st=await sR.json(),ix=await iR.json();
+  const st=await getJSON("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",log);
+  const ix=await getJSON("https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK",log);
   const map={};st.forEach(s=>{const p=parseFloat(s.ClosingPrice);if(p>0)map[s.Code]=p;});
   let n=0;S.holdings.forEach(h=>{if(map[h.code]){h.price=map[h.code];n++;}});
   const last=ix[ix.length-1];
   if(last&&last.TAIEX)S.taiex=parseFloat(String(last.TAIEX).replace(/,/g,""));
   S.today=new Date().toISOString().slice(0,10);
   save();renderAll();
-  document.getElementById("fmsg").textContent=`✅ 已更新 ${n} 檔收盤價＋大盤 ${fmt(S.taiex)}（證交所盤後資料）。VIX與景氣燈號請手動更新（④）。`;
+  document.getElementById("fmsg").textContent=`✅ 已更新 ${n} 檔收盤價＋大盤 ${fmt(S.taiex)}（證交所盤後資料，通道：${log.length<=2?"直連":"代理"}）。VIX與景氣燈號請手動更新（④）。`;
   document.getElementById("fmsg").className="msg ok";
  }catch(e){
-  el.textContent="❌ 連線被阻擋。請確認網路，或本檔需以瀏覽器直接開啟（非預覽視窗）。VIX/燈號一律手動輸入。";
+  el.innerHTML="❌ 三通道皆失敗（"+(e.message||e)+"）。過程："+log.join(" → ")+"。<br><b>最常見原因：公司網路防火牆封鎖外部API</b>——請改用手機4G/5G或家用WiFi開啟同一網址測試。";
   el.className="msg bad";
  }
 }
