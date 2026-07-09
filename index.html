@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>投資駕駛艙 v5</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif}
+body{background:#f5f5f4;color:#1c1917;padding-bottom:40px;font-variant-numeric:tabular-nums}
+.hdr{position:sticky;top:0;z-index:10;background:#1c1917;color:#f5f5f4;padding:10px 14px;box-shadow:0 2px 8px rgba(0,0,0,.3);display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center;font-size:12px}
+.hdr b{font-size:16px}
+.badge{font-size:10px;padding:2px 8px;border-radius:99px;font-weight:700;color:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:14px}
+details{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:12px}
+summary{cursor:pointer;padding:12px 16px;font-size:12px;font-weight:700;letter-spacing:.08em;color:#78716c;list-style:none;display:flex;justify-content:space-between}
+summary::after{content:"▾";color:#d6d3d1}
+.bd{padding:0 16px 16px}
+input,select{border:1px solid #d6d3d1;border-radius:8px;padding:7px 9px;font-family:ui-monospace,monospace;font-size:14px;width:100%}
+label{font-size:11px;color:#78716c;display:block}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{font-size:10px;color:#a8a29e;text-align:right;padding:3px 5px;font-weight:600}
+th:first-child{text-align:left}
+td{padding:5px;text-align:right;border-top:1px solid #f5f5f4}
+td:first-child{text-align:left}
+td input{padding:3px 5px;font-size:12px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.g5{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.card{background:#fafaf9;border-radius:10px;padding:10px 12px}
+.card .l{font-size:10px;color:#a8a29e}.card .v{font-size:19px;font-weight:700;font-family:ui-monospace,monospace}
+.ok{background:#ecfdf5;color:#065f46}.warn{background:#fffbeb;color:#92400e}.bad{background:#fef2f2;color:#991b1b}
+.msg{border-radius:10px;padding:9px 12px;font-size:13px;font-weight:600;margin:6px 0}
+.act{font-size:13px;color:#44403c;border-left:3px solid #d6d3d1;padding-left:10px;margin:4px 0}
+.btn{background:#1d4ed8;color:#fff;border:none;border-radius:10px;padding:11px;font-size:14px;font-weight:700;width:100%;cursor:pointer}
+.btn2{background:#fff;color:#57534e;border:1px solid #d6d3d1;border-radius:99px;padding:5px 14px;font-size:12px;cursor:pointer}
+.btn2.on{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+.track{position:relative;height:30px;border-radius:99px;background:#e7e5e4;overflow:hidden}
+.band{position:absolute;height:100%;background:#a7f3d0}.needle{position:absolute;height:100%;width:3px;background:#1c1917}
+.lt{display:flex;align-items:center;gap:8px;font-size:13px;margin-top:6px}
+.dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+.dg{background:#059669}.da{background:#d97706}.dr{background:#dc2626}
+.row{display:flex;justify-content:space-between;padding:7px 0;border-top:1px solid #f5f5f4;font-size:13px}
+.small{font-size:10px;color:#a8a29e;margin-top:5px;line-height:1.5}
+.pg{color:#047857;font-weight:700}.pr{color:#b91c1c;font-weight:700}
+.chk{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid #f5f5f4;font-size:13px}
+.chk input{width:20px;height:20px;margin-top:1px}
+.bar{height:8px;border-radius:99px;background:#e7e5e4;overflow:hidden}.bar>div{height:100%;background:#1d4ed8}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11px;margin-top:8px}
+.sw{width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:4px}
+.mono{font-family:ui-monospace,monospace}
+</style>
+</head>
+<body>
+<div class="hdr" id="hdr"></div>
+<div class="wrap" id="app"></div>
+
+<script>
+// ══════════ 狀態（自動存到localStorage）══════════
+const DEF = {
+ taiex:45900, today:new Date().toISOString().slice(0,10),
+ holdings:[
+  {name:"元大台灣50正2",code:"00631L",shares:131920,cost:27.36,price:37.5,cat:"槓桿",div:0},
+  {name:"富邦臺灣加權正2",code:"00675L",shares:1200,cost:181.58,price:326.48,cat:"槓桿",div:0},
+  {name:"群益臺灣加權正2",code:"00685L",shares:8800,cost:12.68,price:12.34,cat:"槓桿",div:0},
+  {name:"元大台灣50",code:"0050",shares:20000,cost:88.10,price:106.5,cat:"原型",div:3.0},
+  {name:"主動統一台股增長",code:"00981A",shares:39000,cost:24.56,price:29.91,cat:"主動",div:1.6},
+  {name:"元大高息低波",code:"00713",shares:5000,cost:50.20,price:60.67,cat:"高息",div:3.4},
+  {name:"復華科技優息",code:"00929",shares:6000,cost:15.69,price:30.48,cat:"高息",div:1.3},
+  {name:"台汽電",code:"8926",shares:24498,cost:30.92,price:79.05,cat:"個股",div:2.5},
+  {name:"台積電",code:"2330",shares:180,cost:1950.39,price:2457.5,cat:"個股",div:20},
+  {name:"亞泥",code:"1102",shares:11000,cost:8.29,price:36.35,cat:"個股",div:1.6},
+  {name:"為升",code:"2231",shares:3070,cost:199.34,price:114.0,cat:"個股",div:2.0},
+  {name:"長榮",code:"2603",shares:800,cost:210.03,price:186.75,cat:"個股",div:10},
+  {name:"長榮航",code:"2618",shares:2000,cost:31.76,price:42.33,cat:"個股",div:1.5},
+  {name:"台新新光金",code:"2887",shares:2274,cost:14.30,price:34.92,cat:"個股",div:1.0},
+  {name:"兆豐金",code:"2886",shares:1038,cost:33.27,price:47.08,cat:"個股",div:1.8}],
+ investCash:2626000, survivalFund:1200000,
+ bandTarget:110, tolerance:10,
+ loans:[
+  {name:"房貸（原貸）",p:7600000,rate:2.49,y:38,m:6},
+  {name:"房屋增貸",p:4830000,rate:2.49,y:30,m:0},
+  {name:"信貸（元大）",p:4900000,rate:3.5,y:10,m:0}],
+ pledgeCol:0,pledgeLoan:0,pledgeRate:3.0,
+ houseValue:18000000,houseInDenom:false,houseExposure:false,
+ dcaMonthly:10000,
+ stress:-35, wTarget:60000000,wRate:4,wGrowth:10,
+ ma5:45500,ma20:44200,ma60:42500,ma120:40500,ma240:37500,rsiW:65,kdW:75,
+ vix:19, light:"綠燈",
+ base981:0.281,base631:3.04,
+ checks:[false,false,false,false,false,false]
+};
+let S; try{S=Object.assign(structuredClone(DEF),JSON.parse(localStorage.getItem("cockpit_v5")||"{}"));}catch(e){S=structuredClone(DEF);}
+const save=()=>localStorage.setItem("cockpit_v5",JSON.stringify(S));
+
+const BATCHES=[
+ {name:"舊備用金",amt:297000,idx:40000,extra:"或00981A≤28.5",dl:"2026-07-31"},
+ {name:"信貸第二批",amt:1000000,idx:42500,extra:"",dl:"2026-08-31"},
+ {name:"信貸第三批",amt:800000,idx:40000,extra:"",dl:"2026-09-30"},
+ {name:"信貸第四批",amt:529000,idx:37000,extra:"",dl:"2026-10-31"}];
+const TRIMS=[[48000,"檢查曝險比，>115% 修剪至110%"],[50000,"檢查曝險比，>110% 修剪至105%；台汽電未減碼者減半"],[52000,"無條件修剪至105%，實現部分正2獲利"]];
+const GLIDE=[[20000000,50,"投資資產達 2,000萬"],[30000000,40,"3,000萬（目標50%）"],[45000000,25,"4,500萬（目標75%）"],[54000000,10,"5,400萬（目標90%）"],[60000000,0,"達標 6,000萬 → 全轉0050/高息"]];
+const CHECKS=["這筆交易符合「加碼點位表」或「再平衡引擎」的明確觸發條件","今天台股跌幅未超過3%（恐慌日隔天才行動）","交易後曝險比仍在容忍帶內（已試算）","資金來源不是生存預備金","不是新聞/網紅/盤中氣氛後3天內的衝動","這個決定已經放過夜（隔夜原則）"];
+const LIGHTS={"藍燈":{s:"9-16分 景氣低迷",c:"dg",t:"歷史級加碼區（藍燈買、紅燈賣勝率極高）",v:"g"},"黃藍燈":{s:"17-22分 轉弱",c:"dg",t:"偏買訊號",v:"g"},"綠燈":{s:"23-31分 穩定",c:"da",t:"景氣穩定，照計畫執行",v:"a"},"黃紅燈":{s:"32-37分 轉熱",c:"da",t:"注意過熱，暫停追高",v:"a"},"紅燈":{s:"38-45分 過熱",c:"dr",t:"歷史減碼區——搭配曝險引擎修剪",v:"r"}};
+const CAT_C={"槓桿":"#c2452d","原型":"#1d5fa0","主動":"#6b4fa0","高息":"#0e6e56","個股":"#8a5a0b","現金":"#9aa0a6","房產":"#5b7a8c"};
+
+const wan=n=>(n/10000).toLocaleString("zh-TW",{maximumFractionDigits:1})+"萬";
+const pc=n=>(n*100).toFixed(1)+"%";
+const fmt=n=>Math.round(n).toLocaleString("zh-TW");
+const pmt=(p,r,y,m)=>{const mo=r/100/12,n=y*12+(m||0);if(!p||!n)return 0;if(mo===0)return p/n;return p*mo*Math.pow(1+mo,n)/(Math.pow(1+mo,n)-1);};
+const px=c=>{const h=S.holdings.find(x=>x.code===c);return h?h.price:0;};
+const badge=r=>{const x=r*100;return x<100?["低風險","#059669"]:x<=130?["中風險","#d97706"]:x<=160?["高風險","#c2410c"]:["極高風險","#b91c1c"];};
+
+// ══════════ 計算 ══════════
+function compute(){
+ let V=0,L=0,cost=0;const byCat={};
+ S.holdings.forEach(h=>{const v=h.shares*h.price;V+=v;cost+=h.shares*h.cost;if(h.cat==="槓桿")L+=v;byCat[h.cat]=(byCat[h.cat]||0)+v;});
+ const mort=S.loans[0].p+S.loans[1].p, credit=S.loans[2].p+S.pledgeLoan;
+ const hEq=Math.max(0,S.houseValue-mort);
+ let E=2*L+(V-L),A=V+S.investCash;
+ if(S.houseInDenom)A+=hEq; if(S.houseExposure)E+=hEq;
+ const monthly=S.loans.reduce((s,l)=>s+pmt(l.p,l.rate,l.y,l.m),0)+S.pledgeLoan*S.pledgeRate/100/12;
+ const pie=Object.entries(byCat).map(([k,v])=>({name:k,value:v}));
+ pie.push({name:"現金",value:S.investCash}); if(S.houseInDenom)pie.push({name:"房產",value:hEq});
+ return {V,L,E,A,ratio:A>0?E/A:0,pnl:V-cost,cost,levPct:V>0?L/V:0,hEq,mort,credit,monthly,pie,
+  netWorth:V+S.investCash+S.survivalFund+S.houseValue-mort-credit};
+}
+
+// ══════════ 自動抓取 ══════════
+async function autoFetch(){
+ const el=document.getElementById("fmsg");el.textContent="抓取中…";el.className="msg warn";
+ try{
+  const [sR,iR]=await Promise.all([
+   fetch("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"),
+   fetch("https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK")]);
+  const st=await sR.json(),ix=await iR.json();
+  const map={};st.forEach(s=>{const p=parseFloat(s.ClosingPrice);if(p>0)map[s.Code]=p;});
+  let n=0;S.holdings.forEach(h=>{if(map[h.code]){h.price=map[h.code];n++;}});
+  const last=ix[ix.length-1];
+  if(last&&last.TAIEX)S.taiex=parseFloat(String(last.TAIEX).replace(/,/g,""));
+  S.today=new Date().toISOString().slice(0,10);
+  save();renderAll();
+  document.getElementById("fmsg").textContent=`✅ 已更新 ${n} 檔收盤價＋大盤 ${fmt(S.taiex)}（證交所盤後資料）。VIX與景氣燈號請手動更新（④）。`;
+  document.getElementById("fmsg").className="msg ok";
+ }catch(e){
+  el.textContent="❌ 連線被阻擋。請確認網路，或本檔需以瀏覽器直接開啟（非預覽視窗）。VIX/燈號一律手動輸入。";
+  el.className="msg bad";
+ }
+}
+
+// ══════════ 畫面 ══════════
+function sec(id,title,open,inner){return `<details ${open?"open":""}><summary>${title}</summary><div class="bd" id="${id}">${inner}</div></details>`;}
+function inp(path,val,step){return `<input type="number" step="${step||"any"}" value="${val}" oninput="setV('${path}',this.value)">`;}
+window.setV=(path,v)=>{const ks=path.split(".");let o=S;for(let i=0;i<ks.length-1;i++)o=o[ks[i]];o[ks[ks.length-1]]=parseFloat(v)||0;save();renderOut();};
+window.setS=(k,v)=>{S[k]=v;save();renderOut();};
+window.setH=(i,f,v)=>{S.holdings[i][f]=parseFloat(v)||0;save();renderOut();};
+window.setL=(i,f,v)=>{S.loans[i][f]=parseFloat(v)||0;save();renderOut();};
+window.setChk=(i,v)=>{S.checks[i]=v;save();renderOut();};
+window.setDate=v=>{S.today=v;save();renderOut();};
+window.setLight=v=>{S.light=v;save();renderOut();};
+window.resetAll=()=>{if(confirm("恢復為預設值？（會清除你儲存的所有修改）")){localStorage.removeItem("cockpit_v5");location.reload();}};
+
+function renderAll(){
+ const app=document.getElementById("app");
+ app.innerHTML=[
+  sec("s1","① 今日市況（一鍵自動抓取）",true,`
+   <button class="btn" onclick="autoFetch()">⚡ 一鍵抓取今日收盤價＋大盤指數</button>
+   <div id="fmsg" class="small"></div>
+   <div class="g2" style="margin-top:10px">
+    <label>台股加權指數${inp("taiex",S.taiex)}</label>
+    <label>今日日期<input type="date" value="${S.today}" onchange="setDate(this.value)"></label>
+   </div>`),
+  sec("s2","② 智慧健檢（自動紅旗）",true,`<div id="healthBox"></div>`),
+  sec("s3","③ 曝險再平衡引擎",true,`
+   <div class="track"><div class="band" id="band"></div><div class="needle" id="needle"></div></div>
+   <div style="display:flex;justify-content:space-between;font-size:10px;color:#a8a29e;margin-top:3px"><span>80%</span><span>100%</span><span>120%</span><span>140%</span></div>
+   <div id="rebBox"></div>
+   <label style="margin-top:10px">目標曝險 <b id="btLabel">${S.bandTarget}%</b>
+    <input type="range" min="80" max="140" value="${S.bandTarget}" oninput="S.bandTarget=+this.value;document.getElementById('btLabel').textContent=this.value+'%';save();renderOut()">
+   </label>
+   <div style="display:flex;gap:8px;margin-top:6px" id="tolBtns"></div>`),
+  sec("s4","④ 技術溫度計（台股均線＋VIX＋景氣燈號）",true,`
+   <div class="g5">
+    <label>週線5MA${inp("ma5",S.ma5)}</label><label>月線20MA${inp("ma20",S.ma20)}</label>
+    <label>季線60MA${inp("ma60",S.ma60)}</label><label>半年線120MA${inp("ma120",S.ma120)}</label><label>年線240MA${inp("ma240",S.ma240)}</label>
+   </div>
+   <div class="g3" style="margin-top:8px">
+    <label>週RSI${inp("rsiW",S.rsiW)}</label><label>週KD${inp("kdW",S.kdW)}</label>
+    <label>美股VIX${inp("vix",S.vix,0.1)}</label>
+   </div>
+   <label style="margin-top:8px">國發會景氣燈號（每月27日左右公布上月）
+    <select onchange="setLight(this.value)">${Object.keys(LIGHTS).map(k=>`<option ${S.light===k?"selected":""}>${k}</option>`).join("")}</select>
+   </label>
+   <div id="thermoBox"></div>`),
+  sec("s5","⑤ 均線防線與損益預演",true,`<div id="maBox"></div>`),
+  sec("s6","⑥ 換倉匯率監控",false,`
+   <div id="swapBox"></div>
+   <div class="g2"><label>基準 981A/0050${inp("base981",S.base981,0.001)}</label><label>基準 631L/685L${inp("base631",S.base631,0.01)}</label></div>`),
+  sec("s7","⑦ 定期定額0050（薪資投入）",false,`
+   <label>每月定期定額（元）${inp("dcaMonthly",S.dcaMonthly,1000)}</label>
+   <div id="dcaBox"></div>`),
+  sec("s8","⑧ 借貸債務（本金/利率/年+月 可調＝借新還舊試算）",false,`<div id="loanBox"></div>
+   <div class="g3" style="margin-top:10px">
+    <label>質押股票市值${inp("pledgeCol",S.pledgeCol)}</label>
+    <label>質押借款${inp("pledgeLoan",S.pledgeLoan)}</label>
+    <label>質押利率%${inp("pledgeRate",S.pledgeRate,0.1)}</label>
+   </div>`),
+  sec("s9","⑨ 房產淨值",false,`
+   <div class="g2">
+    <label>房產估值${inp("houseValue",S.houseValue)}</label>
+    <div><label>房產淨值（估值−房貸）</label><div class="v mono" id="hEqBox" style="font-size:18px;font-weight:700;padding-top:6px"></div></div>
+   </div>
+   <label class="chk" style="margin-top:8px"><input type="checkbox" ${S.houseInDenom?"checked":""} onchange="setS('houseInDenom',this.checked)">計入房產淨值進分母（平緩槓桿）</label>
+   <label class="chk"><input type="checkbox" ${S.houseExposure?"checked":""} onchange="setS('houseExposure',this.checked)">房產1X曝險計入</label>`),
+  sec("s10","⑩ 配息現金流儀表板",false,`<div id="divBox"></div>`),
+  sec("s11","⑪ 黑天鵝崩盤模擬",false,`
+   <div style="display:flex;align-items:center;gap:10px">
+    <input type="range" min="-50" max="0" value="${S.stress}" style="flex:1" oninput="S.stress=+this.value;save();renderOut()">
+    <b class="mono pr" id="stLabel" style="font-size:20px;width:60px;text-align:right">${S.stress}%</b>
+   </div>
+   <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px">${[-5,-10,-15,-20,-25,-30,-35,-40,-45,-50].map(p=>`<button class="btn2" onclick="S.stress=${p};save();renderAll()">${p}%</button>`).join("")}</div>
+   <div id="stressBox"></div>`),
+  sec("s12","⑫ 資產配置圓餅圖",false,`<div id="pieBox" style="display:flex;justify-content:center"></div><div class="legend" id="pieLegend"></div>`),
+  sec("s13","⑬ 加碼點位（價格或到期先到先執行）",true,`<div id="batchBox"></div>`),
+  sec("s14","⑭ 賣出點位與Glide Path（目標6,000萬）",false,`<div id="trimBox"></div>`),
+  sec("s15","⑮ 交易前衝動剎車",false,`<div id="chkBox"></div>`),
+  sec("s16","⑯ 持倉明細（可編輯，自動儲存）",false,`<div style="overflow-x:auto" id="holdBox"></div>
+   <div class="g2" style="margin-top:10px">
+    <label>可投資現金${inp("investCash",S.investCash)}</label>
+    <label>生存預備金${inp("survivalFund",S.survivalFund)}</label>
+   </div>
+   <button class="btn2" style="margin-top:10px" onclick="resetAll()">恢復預設值</button>`),
+  sec("s17","⑰ 提領試算（目標6,000萬）",false,`
+   <div class="g3">
+    <label>目標資產${inp("wTarget",S.wTarget)}</label>
+    <label>提領率%${inp("wRate",S.wRate,0.5)}</label>
+    <label>年化%${inp("wGrowth",S.wGrowth)}</label>
+   </div><div id="wBox"></div>
+   <div class="small" style="margin-top:10px">💾 本頁所有數字自動儲存在此裝置瀏覽器（localStorage），關閉重開不會消失。每日流程：①抓取 → 看②③⑬紅字 → 交易先過⑮ → 關閉。三鐵律：生存金永不進場／不賣在均攤以下／恐慌日不決策。</div>`),
+ ].join("");
+ renderOut();
+}
+
+function renderOut(){
+ const c=compute();
+ // 頂欄
+ const [bl,bc]=badge(c.ratio);
+ document.getElementById("hdr").innerHTML=`
+  <span class="badge" style="background:${bc}">${bl}</span>
+  <span>曝險比 <b>${pc(c.ratio)}</b></span>
+  <span>槓桿 <b style="color:#fbbf24">${c.ratio.toFixed(2)}x</b></span>
+  <span>淨資產 <b style="color:#34d399">${wan(c.netWorth)}</b></span>
+  <span>月繳 <b style="color:#f87171">${fmt(c.monthly)}</b></span>
+  <span>持股損益 <b style="color:${c.pnl>=0?'#34d399':'#f87171'}">${c.pnl>=0?"+":""}${wan(c.pnl)}</b></span>`;
+ // 健檢
+ const flags=[];
+ S.holdings.forEach(h=>{const v=h.shares*h.price,w=v/c.V,ret=h.price/h.cost-1;
+  if(h.cat==="個股"&&w>0.10)flags.push(["warn",`${h.name} 佔持股 ${pc(w)} — 單一個股超過10%`]);
+  if(ret<-0.30&&v>50000)flags.push(["bad",`${h.name} 虧損 ${pc(ret)} — 今天還會買它嗎？`]);});
+ if(c.levPct>0.55)flags.push(["bad",`正2佔持股 ${pc(c.levPct)} 超過55%上限`]);
+ if(c.ratio>(S.bandTarget+S.tolerance)/100)flags.push(["bad","曝險比超出容忍帶 — 依③引擎修剪"]);
+ const runway=(S.investCash+S.survivalFund)/c.monthly;
+ if(runway<12)flags.push(["warn",`現金僅可支撐月繳 ${runway.toFixed(0)} 個月（<12月警戒）`]);
+ if(S.taiex<S.ma240)flags.push(["bad","台股跌破年線240MA — 停止一切加碼"]);
+ if(S.light==="紅燈")flags.push(["warn","景氣紅燈 — 歷史過熱區，配合修剪不追高"]);
+ document.getElementById("healthBox").innerHTML=flags.length===0?`<div class="msg ok">✅ 全部通過，組合健康</div>`:flags.map(f=>`<div class="msg ${f[0]}">${f[0]==="bad"?"🚨":"⚠️"} ${f[1]}</div>`).join("");
+ // 引擎
+ const lo=S.bandTarget-S.tolerance,hi=S.bandTarget+S.tolerance,t=S.bandTarget/100;
+ document.getElementById("band").style.left=((lo-80)/60*100)+"%";
+ document.getElementById("band").style.width=((hi-lo)/60*100)+"%";
+ document.getElementById("needle").style.left=(Math.min(Math.max((c.ratio*100-80)/60,0),1)*100)+"%";
+ let reb;
+ const p631=px("00631L");
+ if(c.ratio>hi/100){const a=c.E-t*c.A;reb=`<div class="msg bad">曝險比 ${pc(c.ratio)} > 上限 ${hi}% — 建議賣出</div><div class="act">1X調整（賣正2換0050）：${wan(a)}（約 ${Math.ceil(a/(p631*1000))} 張 00631L）</div><div class="act">2X調整（賣正2留現金）：${wan(a/2)}</div>`;}
+ else if(c.ratio<lo/100){const b=t*c.A-c.E;reb=`<div class="msg bad">曝險比 ${pc(c.ratio)} < 下限 ${lo}% — 建議買進</div><div class="act">1X調整（現金買0050）：${wan(b)}</div><div class="act">2X調整（現金買正2）：${wan(b/2)}（槓桿貼頂勿用）</div>`;}
+ else reb=`<div class="msg ok">曝險比 ${pc(c.ratio)} 位於 ${lo}–${hi}% 帶內 — 不需動作</div>`;
+ document.getElementById("rebBox").innerHTML=reb;
+ document.getElementById("tolBtns").innerHTML=[[5,"嚴謹±5%"],[10,"適中±10%"],[15,"寬鬆±15%"]].map(o=>`<button class="btn2 ${S.tolerance===o[0]?"on":""}" onclick="S.tolerance=${o[0]};save();renderAll()">${o[1]}</button>`).join("");
+ // 溫度計
+ const dev=(S.taiex-S.ma20)/S.ma20;const li=LIGHTS[S.light];
+ const lights=[
+  S.taiex>=S.ma5?["dg",`站上週線5MA（${fmt(S.ma5)}）短多`]:["da","跌破週線5MA 短線轉弱"],
+  dev>0.08?["dr",`月線乖離 ${pc(dev)} > 8% 過熱，禁止加碼`]:dev<-0.05?["dg",`月線乖離 ${pc(dev)} 超跌，積極買點`]:["da",`月線乖離 ${pc(dev)} 中性`],
+  S.rsiW>70?["dr",`週RSI ${S.rsiW} 過熱`]:S.rsiW<40?["dg",`週RSI ${S.rsiW} 買點`]:["da",`週RSI ${S.rsiW} 中性`],
+  S.kdW>80?["dr",`週KD ${S.kdW} 高檔`]:S.kdW<20?["dg",`週KD ${S.kdW} 低檔`]:["da",`週KD ${S.kdW} 中性`],
+  S.vix<15?["dr",`VIX ${S.vix} 過度自滿 — 高檔警訊`]:S.vix<=20?["da",`VIX ${S.vix} 平靜`]:S.vix<=25?["da",`VIX ${S.vix} 警戒`]:["dg",`VIX ${S.vix} 恐慌 — 歷史買點區`],
+  [li.c,`景氣${S.light}（${li.s}）— ${li.t}`]];
+ const g=lights.filter(l=>l[0]==="dg").length,r=lights.filter(l=>l[0]==="dr").length;
+ const verdict=r>=3?"🔴 多項過熱：只賣不買（除非批次到期）":g>=4?"🟢 深度超跌：加碼溫度最佳":"🟡 中性：照觸發條件執行";
+ document.getElementById("thermoBox").innerHTML=lights.map(l=>`<div class="lt"><span class="dot ${l[0]}"></span>${l[1]}</div>`).join("")+`<div class="msg" style="background:#fafaf9;color:#1c1917;margin-top:8px">${verdict}</div>`;
+ // 均線防線
+ document.getElementById("maBox").innerHTML=[["季線 60MA",S.ma60,"執行對應批次加碼（0050）"],["半年線 120MA",S.ma120,"第三、四批全數執行"],["年線 240MA",S.ma240,"🛑 停止一切加碼，保現金防守"]].map(rw=>{
+  const d=rw[1]/S.taiex-1;let sv=0;
+  S.holdings.forEach(h=>{const b=h.cat==="槓桿"?2:1;sv+=Math.max(0,h.shares*h.price*(1+b*d));});
+  const pnl=sv-c.cost,brk=S.taiex<rw[1];
+  return `<div class="row" style="${brk?"color:#b91c1c":""}"><span><b>${brk?"🚨已跌破 ":""}${rw[0]} ${fmt(rw[1])}</b><div class="small">${rw[2]}</div></span><span class="mono" style="text-align:right">${pc(d)}<br><span class="${pnl>=0?'pg':'pr'}">${pnl>=0?"+":""}${wan(pnl)}</span></span></div>`;}).join("");
+ // 換倉
+ const mkSwap=(cur,base,sn,bn)=>{const p=cur/base-1;return {p,good:p>0.015,txt:p>0.015?`✅ ${sn}相對貴 ${pc(p)} → 今天適合賣${sn}換${bn}`:`— 偏差 ${pc(p)}，未達+1.5%，再等`,cur};};
+ const sw=[["00981A → 0050",mkSwap(px("00981A")/px("0050"),S.base981,"00981A","0050")],["00631L → 00685L",mkSwap(px("00631L")/px("00685L"),S.base631,"00631L","00685L")]];
+ document.getElementById("swapBox").innerHTML=sw.map(s=>`<div class="msg ${s[1].good?"ok":""}" style="${s[1].good?"":"background:#fafaf9;color:#57534e;font-weight:400"}"><div style="display:flex;justify-content:space-between"><b>${s[0]}</b><span class="mono">現匯率 ${s[1].cur.toFixed(4)}</span></div><div class="small">${s[1].txt}</div></div>`).join("");
+ // 定期定額 + 提領
+ const gr=S.wGrowth/100;
+ const solve=d=>{let a=c.A,y=0;while(a<S.wTarget&&y<60){a=a*(1+gr)+d*12;y++;}return y;};
+ const yW=solve(S.dcaMonthly),yN=solve(0);
+ const fv=n=>S.dcaMonthly*12*(Math.pow(1+gr,n)-1)/gr;
+ document.getElementById("dcaBox").innerHTML=`<div class="g2" style="margin-top:10px">
+  <div class="card"><div class="l">10年累積（投入${wan(S.dcaMonthly*120)}）</div><div class="v pg">${wan(fv(10))}</div></div>
+  <div class="card"><div class="l">20年累積市值</div><div class="v pg">${wan(fv(20))}</div></div></div>
+  <div class="msg ok" style="margin-top:8px;font-weight:400;font-size:12px">加入定期定額後達標6,000萬：<b>${yW}年</b>（不定額${yN}年，<b>提前${yN-yW}年</b>）。薪資買0050＝最好的自然再平衡。</div>`;
+ // 貸款
+ document.getElementById("loanBox").innerHTML=`<table><tr><th>貸款</th><th>本金餘額</th><th>利率%</th><th>年</th><th>月</th><th>月繳</th><th>首年利息</th></tr>`+
+  S.loans.map((l,i)=>`<tr><td>${l.name}</td>
+   <td><input style="width:100px" value="${l.p}" oninput="setL(${i},'p',this.value)"></td>
+   <td><input style="width:55px" value="${l.rate}" oninput="setL(${i},'rate',this.value)"></td>
+   <td><input style="width:48px" value="${l.y}" oninput="setL(${i},'y',this.value)"></td>
+   <td><input style="width:48px" value="${l.m}" oninput="setL(${i},'m',this.value)"></td>
+   <td class="mono">${fmt(pmt(l.p,l.rate,l.y,l.m))}</td>
+   <td class="mono">${wan(l.p*l.rate/100)}</td></tr>`).join("")+
+  `</table><div class="row" style="font-weight:700"><span>月繳合計（自動加總）</span><span class="mono pr">${fmt(c.monthly)}元</span></div>
+  <div class="small">💡 借新還舊：直接改該列利率/年/月/本金，全站即時重算。例：信貸 10年0月 3.5% → 改 7年6月 2.8% 看月繳差異。</div>`;
+ // 房產
+ document.getElementById("hEqBox").textContent=wan(c.hEq);
+ // 配息
+ const aDiv=S.holdings.reduce((s,h)=>s+h.shares*h.div,0);
+ const aInt=S.loans[1].p*S.loans[1].rate/100+S.loans[2].p*S.loans[2].rate/100+S.pledgeLoan*S.pledgeRate/100;
+ document.getElementById("divBox").innerHTML=`<div class="g2">
+  <div class="card"><div class="l">年配息合計</div><div class="v pg">${wan(aDiv)}</div></div>
+  <div class="card"><div class="l">借款年利息（投資部位）</div><div class="v pr">${wan(aInt)}</div></div>
+  <div class="card"><div class="l">配息覆蓋利息</div><div class="v ${aDiv>=aInt?"pg":""}" style="${aDiv<aInt?"color:#92400e":""}">${pc(aInt>0?aDiv/aInt:0)}</div></div>
+  <div class="card"><div class="l">月繳缺口</div><div class="v">${fmt(c.monthly-aDiv/12)}元</div></div></div>
+  <table style="margin-top:10px"><tr><th>標的</th><th>每股年配息</th><th>年配息</th></tr>`+
+  S.holdings.map((h,i)=>h.div>0?`<tr><td>${h.name}</td><td><input style="width:60px" value="${h.div}" oninput="setH(${i},'div',this.value)"></td><td class="mono">${wan(h.shares*h.div)}</td></tr>`:"").join("")+`</table>`;
+ // 壓測
+ const d=S.stress/100;let sv=0,sl=0;
+ S.holdings.forEach(h=>{const b=h.cat==="槓桿"?2:1;const v=Math.max(0,h.shares*h.price*(1+b*d));sv+=v;if(h.cat==="槓桿")sl+=v;});
+ let sE=2*sl+(sv-sl),sA=sv+S.investCash;
+ if(S.houseInDenom)sA+=c.hEq; if(S.houseExposure)sE+=c.hEq;
+ const sRatio=sA>0?sE/sA:0,[sbl,sbc]=badge(sRatio);
+ const sNet=sv+S.investCash+S.survivalFund+S.houseValue-c.mort-c.credit;
+ const sCol=S.pledgeCol*(1+d),maint=S.pledgeLoan>0?sCol/S.pledgeLoan:null;
+ const stEl=document.getElementById("stressBox");
+ if(stEl){document.getElementById("stLabel").textContent=S.stress+"%";
+ stEl.innerHTML=`<div class="g2" style="margin-top:10px">
+  <div class="card"><div class="l">模擬淨資產</div><div class="v">${wan(sNet)}</div></div>
+  <div class="card"><div class="l">持股蒸發</div><div class="v pr">${wan(sv-c.V)}</div></div>
+  <div class="card"><div class="l">模擬曝險比</div><div class="v">${pc(sRatio)} <span class="badge" style="background:${sbc};font-size:9px">${sbl}</span></div></div>
+  <div class="card"><div class="l">質押維持率</div><div class="v">${maint===null?"無質押 ✅":(maint*100).toFixed(1)+"%"}</div></div></div>`+
+  (maint!==null&&maint<1.4?`<div class="msg bad">🚨 追繳（<140%）：需補繳 ${fmt(Math.max(0,1.4*S.pledgeLoan-sCol))} 元</div>`:"");}
+ // 圓餅
+ const tot=c.pie.reduce((s,p)=>s+p.value,0);let ang=-90;
+ const arcs=c.pie.map(p=>{const a1=ang,sw2=p.value/tot*360;ang+=sw2;
+  const r=80,cx=100,cy=100;
+  const x1=cx+r*Math.cos(a1*Math.PI/180),y1=cy+r*Math.sin(a1*Math.PI/180);
+  const x2=cx+r*Math.cos((a1+sw2)*Math.PI/180),y2=cy+r*Math.sin((a1+sw2)*Math.PI/180);
+  return `<path d="M${cx},${cy} L${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 ${sw2>180?1:0},1 ${x2.toFixed(1)},${y2.toFixed(1)} Z" fill="${CAT_C[p.name]}" stroke="#fff" stroke-width="1.5"/>`;}).join("");
+ document.getElementById("pieBox").innerHTML=`<svg viewBox="0 0 200 200" width="220" height="220">${arcs}<circle cx="100" cy="100" r="42" fill="#fff"/><text x="100" y="96" text-anchor="middle" font-size="11" fill="#a8a29e">總資產</text><text x="100" y="112" text-anchor="middle" font-size="13" font-weight="700">${wan(tot)}</text></svg>`;
+ document.getElementById("pieLegend").innerHTML=c.pie.map(p=>`<span><span class="sw" style="background:${CAT_C[p.name]}"></span>${p.name} ${wan(p.value)}（${pc(p.value/tot)}）</span>`).join("");
+ // 加碼點位
+ const tN=new Date(S.today);
+ document.getElementById("batchBox").innerHTML=`<table><tr><th>批次</th><th>金額</th><th>觸發</th><th>到期</th><th>狀態</th></tr>`+
+  BATCHES.map(b=>{const days=Math.ceil((new Date(b.dl)-tN)/86400000);let st,cl;
+   if(S.taiex<=b.idx){st="🔥 價格已觸發→立即執行";cl="color:#b91c1c;font-weight:700";}
+   else if(days<0){st="⏰ 已逾期→強制執行";cl="color:#b91c1c;font-weight:700";}
+   else if(days<=14){st=`⚠️ ${days}天後到期`;cl="color:#92400e;font-weight:600";}
+   else{st=`${days}天後到期`;cl="color:#a8a29e";}
+   return `<tr><td>${b.name}<div class="small">${b.extra}</div></td><td class="mono">${wan(b.amt)}</td><td class="mono">≤${fmt(b.idx)}</td><td class="mono">${b.dl.slice(5)}</td><td style="${cl}">${st}</td></tr>`;}).join("")+`</table>`;
+ // 減碼+Glide
+ document.getElementById("trimBox").innerHTML=TRIMS.map(t=>`<div class="row" style="${S.taiex>=t[0]?"color:#b91c1c;font-weight:600":""}"><span class="mono">${fmt(t[0])}</span><span style="text-align:right;flex:1;margin-left:14px">${S.taiex>=t[0]?"🔔 已到達 — ":""}${t[1]}</span></div>`).join("")+
+  `<div style="margin-top:12px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#78716c">GLIDE PATH（降槓桿里程碑）</div>`+
+  GLIDE.map(g=>`<div class="row" style="${c.A>=g[0]?"color:#b91c1c;font-weight:600":""}"><span>${c.A>=g[0]?"✅":"○"} ${g[2]}</span><span>正2上限 <b>${g[1]}%</b></span></div>`).join("")+
+  `<div class="bar" style="margin-top:8px"><div style="width:${Math.min(c.A/60000000,1)*100}%"></div></div>
+  <div class="small">投資資產 ${wan(c.A)} ／ 6,000萬（${pc(c.A/60000000)}）</div>`;
+ // 剎車
+ const allC=S.checks.every(Boolean);
+ document.getElementById("chkBox").innerHTML=CHECKS.map((ck,i)=>`<label class="chk"><input type="checkbox" ${S.checks[i]?"checked":""} onchange="setChk(${i},this.checked)"><span>${ck}</span></label>`).join("")+
+  `<div class="msg ${allC?"ok":"bad"}" style="text-align:center;margin-top:10px">${allC?"✅ 通過紀律檢查 — 可以執行":"⛔ 尚有 "+S.checks.filter(x=>!x).length+" 項未通過 — 停手"}</div>
+  <button class="btn2" style="margin-top:6px" onclick="S.checks=[false,false,false,false,false,false];save();renderAll()">重置清單</button>`;
+ // 持倉
+ document.getElementById("holdBox").innerHTML=`<table style="min-width:520px"><tr><th>標的</th><th>股數</th><th>均攤</th><th>現價</th><th>市值</th><th>損益</th></tr>`+
+  S.holdings.map((h,i)=>{const v=h.shares*h.price,pl=v-h.shares*h.cost;
+   return `<tr><td><span class="sw" style="background:${CAT_C[h.cat]}"></span>${h.name}<span style="color:#a8a29e;margin-left:4px">${h.code}</span></td>
+    <td><input style="width:82px" value="${h.shares}" oninput="setH(${i},'shares',this.value)"></td>
+    <td><input style="width:64px" value="${h.cost}" oninput="setH(${i},'cost',this.value)"></td>
+    <td><input style="width:64px" value="${h.price}" oninput="setH(${i},'price',this.value)"></td>
+    <td class="mono">${wan(v)}</td><td class="mono ${pl>=0?"pg":"pr"}">${pl>=0?"+":""}${wan(pl)}</td></tr>`;}).join("")+`</table>`;
+ // 提領
+ document.getElementById("wBox").innerHTML=`<div class="g2" style="margin-top:10px">
+  <div class="card"><div class="l">達標後每月可提領</div><div class="v pg">${fmt(S.wTarget*S.wRate/100/12)}元</div></div>
+  <div class="card"><div class="l">含定期定額達標時間</div><div class="v">${yW>=60?"—":"約 "+yW+" 年"}</div><div class="small">進度 ${pc(c.A/S.wTarget)}</div></div></div>
+  <div class="msg bad" style="font-size:12px;margin-top:8px">提領前依Glide Path降槓桿至0，避免開局熊市×2倍傷害。</div>`;
+}
+renderAll();
+</script>
+</body>
+</html>
