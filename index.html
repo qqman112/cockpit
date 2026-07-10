@@ -81,6 +81,7 @@ const DEF = {
  pledgeCol:0,pledgeLoan:0,pledgeRate:3.0,
  houseValue:18000000,houseInDenom:false,houseExposure:false,
  dcaMonthly:10000,
+ simLoanWan:490,simRateBp:350,simY:10,simM:0,simPledge:false,simLivingWan:3,incomeM:96667,
  stress:-35, wTarget:60000000,wRate:4,wGrowth:10,
  ma5:45500,ma20:44200,ma60:42500,ma120:40500,ma240:37500,rsiW:65,kdW:75,
  vix:19, light:"綠燈",
@@ -161,6 +162,8 @@ window.setL=(i,f,v)=>{S.loans[i][f]=parseFloat(v)||0;save();renderOut();};
 window.setChk=(i,v)=>{S.checks[i]=v;save();renderOut();};
 window.setDate=v=>{S.today=v;save();renderOut();};
 window.setLight=v=>{S.light=v;save();renderOut();};
+window.simSet=(k,v,lid,ltxt)=>{S[k]=v;if(lid){const e=document.getElementById(lid);if(e)e.textContent=ltxt;}save();renderOut();};
+
 window.resetAll=()=>{if(confirm("恢復為預設值？（會清除你儲存的所有修改）")){localStorage.removeItem("cockpit_v5");location.reload();}};
 
 function renderAll(){
@@ -208,6 +211,22 @@ function renderAll(){
     <label>質押借款${inp("pledgeLoan",S.pledgeLoan)}</label>
     <label>質押利率%${inp("pledgeRate",S.pledgeRate,0.1)}</label>
    </div>`),
+  sec("s8b","⑧b 貸款沙盒（新貸/借新還舊 現金流試算）",false,`
+   <div class="small">情境假設：「此新貸款<b>取代</b>現有信貸」，月繳＝房貸(原+增，讀取⑧實際數字)＋新貸款。調整滑桿即時看現金流。</div>
+   <label style="margin-top:10px">月薪收入${inp("incomeM",S.incomeM)}</label>
+   <label style="margin-top:12px;display:block">借款金額 <b id="simLoanLbl">${S.simLoanWan}萬</b>
+    <input type="range" min="100" max="700" step="10" value="${S.simLoanWan}" oninput="simSet('simLoanWan',+this.value,'simLoanLbl',this.value+'萬')"></label>
+   <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px">${[100,200,300,400,490,600,700].map(p=>`<button class="btn2 ${S.simLoanWan===p?"on":""}" onclick="S.simLoanWan=${p};save();renderAll()">${p}萬</button>`).join("")}</div>
+   <label style="margin-top:14px;display:block">年利率 <b id="simRateLbl">${(S.simRateBp/100).toFixed(2)}%</b>
+    <input type="range" min="230" max="400" step="5" value="${S.simRateBp}" oninput="simSet('simRateBp',+this.value,'simRateLbl',(this.value/100).toFixed(2)+'%')"></label>
+   <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px">${[[259,"2.59%"],[280,"2.80%"],[300,"3.00%"],[350,"3.50%現信貸"],[359,"3.59%質押"]].map(x=>`<button class="btn2 ${S.simRateBp===x[0]?"on":""}" onclick="S.simRateBp=${x[0]};save();renderAll()">${x[1]}</button>`).join("")}</div>
+   <label class="chk" style="margin-top:12px"><input type="checkbox" ${S.simPledge?"checked":""} onchange="S.simPledge=this.checked;save();renderAll()"><span><b>質押模式</b>（僅付息不還本金）｜關閉＝一般信貸本利攤還</span></label>
+   <div class="g2" style="margin-top:6px;${S.simPledge?"display:none":""}">
+    <label>還款年限（年）${inp("simY",S.simY)}</label><label>另加（月）${inp("simM",S.simM)}</label>
+   </div>
+   <label style="margin-top:12px;display:block">每月生活費 <b id="simLivLbl">${S.simLivingWan}萬</b>
+    <input type="range" min="1" max="8" step="0.5" value="${S.simLivingWan}" oninput="simSet('simLivingWan',+this.value,'simLivLbl',this.value+'萬')"></label>
+   <div id="simBox"></div>`),
   sec("s9","⑨ 房產淨值",false,`
    <div class="g2">
     <label>房產估值${inp("houseValue",S.houseValue)}</label>
@@ -321,6 +340,31 @@ function renderOut(){
    <td class="mono">${wan(l.p*l.rate/100)}</td></tr>`).join("")+
   `</table><div class="row" style="font-weight:700"><span>月繳合計（自動加總）</span><span class="mono pr">${fmt(c.monthly)}元</span></div>
   <div class="small">💡 借新還舊：直接改該列利率/年/月/本金，全站即時重算。例：信貸 10年0月 3.5% → 改 7年6月 2.8% 看月繳差異。</div>`;
+ // 貸款沙盒
+ const sb=document.getElementById("simBox");
+ if(sb){
+  const inc=S.incomeM;
+  const mortM=pmt(S.loans[0].p,S.loans[0].rate,S.loans[0].y,S.loans[0].m)+pmt(S.loans[1].p,S.loans[1].rate,S.loans[1].y,S.loans[1].m);
+  const loan=S.simLoanWan*10000, rateD=S.simRateBp/10000;
+  const lm=S.simPledge?loan*rateD/12:pmt(loan,S.simRateBp/100,S.simY,S.simM);
+  const totalDebt=mortM+lm, living=S.simLivingWan*10000;
+  const remain=inc-totalDebt-living;
+  const dr=totalDebt/inc*100, tr=(totalDebt+living)/inc*100;
+  const dbrMax=inc*22/10000, dbrPct=S.simLoanWan/dbrMax*100;
+  const tI=S.simPledge?loan*rateD:lm*(S.simY*12+S.simM)-loan;
+  const delta=totalDebt-c.monthly;
+  const remC=remain>15000?"#047857":remain>0?"#92400e":"#b91c1c";
+  sb.innerHTML=`<div class="g2" style="margin-top:12px">
+   <div class="card"><div class="l">${S.simPledge?"質押月息":"新貸月付（"+S.simY+"年"+(S.simM?S.simM+"月":"")+"）"}</div><div class="v" style="color:#92400e">${fmt(lm)}元</div><div class="small">${(S.simRateBp/100).toFixed(2)}%｜${S.simPledge?"年息":"總利息"} ${wan(tI)}</div></div>
+   <div class="card"><div class="l">每月結餘（薪−債−生活）</div><div class="v" style="color:${remC}">${remain<0?"−":"+"}${fmt(Math.abs(remain))}元</div><div class="small">儲蓄率 ${remain>0?(remain/inc*100).toFixed(1):0}%</div></div>
+   <div class="card"><div class="l">月負債比（房貸＋新貸）</div><div class="v" style="color:${dr>70?"#b91c1c":"#1d5fa0"}">${dr.toFixed(1)}%</div><div class="small">${dr>70?"⚠ 超過銀行上限70%":"✓ 銀行上限70%內"}</div></div>
+   <div class="card"><div class="l">總支出比（含生活費）</div><div class="v" style="color:${tr>100?"#b91c1c":tr>85?"#92400e":"#047857"}">${tr.toFixed(1)}%</div><div class="small">${tr>100?"⚠ 超出月薪":tr>85?"⚠ 現金流偏緊":"✓ 可控"}</div></div>
+  </div>
+  <div class="row"><span>vs 現況實際月繳（⑧合計 ${fmt(c.monthly)}元）</span><span class="mono ${delta<=0?"pg":"pr"}">${delta<=0?"每月省 ":"每月增 "}${fmt(Math.abs(delta))}元</span></div>
+  <div style="margin-top:8px"><div style="display:flex;justify-content:space-between;font-size:11px;color:#78716c"><span>DBR22使用率（${S.simLoanWan}萬／上限約${Math.round(dbrMax)}萬）</span><span>${dbrPct.toFixed(0)}%${dbrPct>90?" ⚠":""}</span></div><div class="bar"><div style="width:${Math.min(dbrPct,100)}%;background:${dbrPct>90?"#d97706":"#1d4ed8"}"></div></div></div>
+  ${S.simLoanWan>Math.round(dbrMax)?`<div class="msg warn" style="font-size:11px;margin-top:8px">⚠ 超過DBR22上限約${Math.round(dbrMax)}萬。元大以股票庫存計算財力屬特殊核貸，非一般薪資DBR限制。</div>`:""}
+  ${remain<0?`<div class="msg bad" style="font-size:12px;margin-top:6px">⚠ 每月現金流為負——此方案不可持續。請降低金額、拉長年限或改質押模式。</div>`:(remain<10000?`<div class="msg warn" style="font-size:12px;margin-top:6px">注意：月結餘低於1萬，現金流非常緊繃。</div>`:"")}`;
+ }
  // 房產
  document.getElementById("hEqBox").textContent=wan(c.hEq);
  // 配息
