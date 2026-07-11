@@ -137,6 +137,12 @@ async function getJSON(u,log){
   try{return await tryFetch("https://api.allorigins.win/raw?url="+encodeURIComponent(u));}
   catch(e2){log.push("代理1失敗→代理2");
    return await tryFetch("https://corsproxy.io/?url="+encodeURIComponent(u));}}}
+let _chan=0;
+async function getJSONfast(u){
+ const chans=[x=>x,x=>"https://api.allorigins.win/raw?url="+encodeURIComponent(x),x=>"https://corsproxy.io/?url="+encodeURIComponent(x)];
+ for(let c=_chan;c<3;c++){try{const r=await tryFetch(chans[c](u));_chan=c;return r;}catch(e){}}
+ throw new Error("三通道皆失敗");
+}
 async function autoFetch(){
  const el=document.getElementById("fmsg");el.textContent="抓取中…（直連→代理1→代理2 三通道嘗試，最久約20秒）";el.className="msg warn";
  const log=[];
@@ -151,11 +157,51 @@ async function autoFetch(){
   let vixOk=false;
   try{const vx=await getJSON("https://cdn.cboe.com/api/global/delayed_quotes/quotes/_VIX.json",log);
    if(vx&&vx.data&&vx.data.last>0){S.vix=+(+vx.data.last).toFixed(1);vixOk=true;}}catch(e){}
+  try{const bw=await getJSON("https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL",log);
+   const ym={};bw.forEach(x=>{const y=parseFloat(x.DividendYield);if(y>0)ym[x.Code]=y;});
+   S.holdings.forEach(h=>{if(h.cat==="個股"&&ym[h.code])h.div=+(h.price*ym[h.code]/100).toFixed(2);});
+  }catch(e){}
   save();renderAll();
-  document.getElementById("fmsg").textContent=`✅ 已更新 ${n} 檔收盤價＋大盤 ${fmt(S.taiex)}${vixOk?"＋VIX "+S.vix:""}（證交所盤後，通道：${log.length<=2?"直連":"代理"}）。${vixOk?"":"VIX請手動、"}景氣燈號請每月手動更新（④）。`;
+  document.getElementById("fmsg").textContent=`✅ 已更新 ${n} 檔收盤價＋大盤 ${fmt(S.taiex)}${vixOk?"＋VIX "+S.vix:""}（證交所盤後，通道：${log.length<=2?"直連":"代理"}）。${vixOk?"":"VIX請手動、"}個股配息已依殖利率自動估算（ETF配息請手動維護）。景氣燈號每月手動（④）。`;
   document.getElementById("fmsg").className="msg ok";
  }catch(e){
   el.innerHTML="❌ 三通道皆失敗（"+(e.message||e)+"）。過程："+log.join(" → ")+"。<br><b>最常見原因：公司網路防火牆封鎖外部API</b>——請改用手機4G/5G或家用WiFi開啟同一網址測試。";
+  el.className="msg bad";
+ }
+}
+
+// ══════════ 均線自動計算（抓13個月歷史收盤）══════════
+async function fetchMA(){
+ const el=document.getElementById("mamsg");
+ el.textContent="抓取13個月歷史資料計算均線中…（約10-30秒，請稍候）";el.className="msg warn";
+ try{
+  const closes=[];const now=new Date(S.today);
+  for(let k=12;k>=0;k--){
+   const d=new Date(now.getFullYear(),now.getMonth()-k,1);
+   const ds=d.getFullYear()+String(d.getMonth()+1).padStart(2,"0")+"01";
+   try{
+    const j=await getJSONfast("https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date="+ds+"&response=json");
+    if(j&&j.data)j.data.forEach(r=>{const v=parseFloat(String(r[4]).replace(/,/g,""));if(v>0)closes.push(v);});
+   }catch(e){}
+  }
+  if(closes.length<240)throw new Error("歷史資料不足（僅"+closes.length+"天，需240天）");
+  const ma=n=>Math.round(closes.slice(-n).reduce((a,b)=>a+b,0)/n);
+  S.ma5=ma(5);S.ma20=ma(20);S.ma60=ma(60);S.ma120=ma(120);S.ma240=ma(240);
+  const wk=[];for(let i=closes.length;i>0;i-=5)wk.unshift(closes.slice(Math.max(0,i-5),i));
+  const wc=wk.map(w=>w[w.length-1]),wh=wk.map(w=>Math.max(...w)),wl=wk.map(w=>Math.min(...w));
+  let g=0,l=0;for(let i=wc.length-14;i<wc.length;i++){const d2=wc[i]-wc[i-1];if(d2>0)g+=d2;else l-=d2;}
+  S.rsiW=Math.round(g+l>0?100*g/(g+l):50);
+  let K=50,Dv=50;
+  for(let i=Math.max(9,wc.length-20);i<wc.length;i++){
+   const hh=Math.max(...wh.slice(i-8,i+1)),ll=Math.min(...wl.slice(i-8,i+1));
+   const rsv=hh>ll?(wc[i]-ll)/(hh-ll)*100:50;K=K*2/3+rsv/3;Dv=Dv*2/3+K/3;}
+  S.kdW=Math.round(K);
+  save();renderAll();
+  const el2=document.getElementById("mamsg");
+  el2.textContent=`✅ 已自動計算（${closes.length}交易日）：5MA ${fmt(S.ma5)}｜20MA ${fmt(S.ma20)}｜60MA ${fmt(S.ma60)}｜120MA ${fmt(S.ma120)}｜240MA ${fmt(S.ma240)}｜週RSI≈${S.rsiW}｜週KD≈${S.kdW}（週指標以收盤近似估算）`;
+  el2.className="msg ok";
+ }catch(e){
+  el.textContent="❌ 均線抓取失敗："+(e.message||e)+"。可能為流量限制，稍後再試或手動填入。";
   el.className="msg bad";
  }
 }
@@ -198,6 +244,8 @@ function renderAll(){
    </label>
    <div style="display:flex;gap:8px;margin-top:6px" id="tolBtns"></div>`),
   sec("s4","④ 技術溫度計（台股均線＋VIX＋景氣燈號）",true,`
+   <button class="btn" style="background:#0e6e56;margin-bottom:8px" onclick="fetchMA()">📐 一鍵計算均線＋週RSI/KD（每週按一次即可）</button>
+   <div id="mamsg" class="small"></div>
    <div class="g5">
     <label>週線5MA${inp("ma5",S.ma5)}</label><label>月線20MA${inp("ma20",S.ma20)}</label>
     <label>季線60MA${inp("ma60",S.ma60)}</label><label>半年線120MA${inp("ma120",S.ma120)}</label><label>年線240MA${inp("ma240",S.ma240)}</label>
@@ -398,7 +446,7 @@ function renderOut(){
   <div class="card"><div class="l">配息−費用 淨流入</div><div class="v ${aDiv-feeDrag>=0?"pg":"pr"}">${wan(aDiv-feeDrag)}</div></div></div>
   <table style="margin-top:10px"><tr><th>標的</th><th>配息/股</th><th>年配息</th><th>成本殖利率</th><th>費用率%</th><th>年費用</th></tr>`+
   S.holdings.map((h,i)=>(h.div>0||(h.fee||0)>0)?`<tr><td>${h.name}</td><td><input style="width:52px;padding:2px 4px" value="${h.div}" oninput="setH(${i},'div',this.value)"></td><td class="mono">${wan(h.shares*h.div)}</td><td class="mono ${h.div/h.cost>=0.05?"pg":""}">${h.div>0?pc(h.div/h.cost):"—"}</td><td><input style="width:46px;padding:2px 4px" value="${h.fee||0}" oninput="setH(${i},'fee',this.value)"></td><td class="mono">${(h.fee||0)>0?wan(h.shares*h.price*h.fee/100):"—"}</td></tr>`:"").join("")+`</table>
-  <div class="small">成本殖利率＝年配息÷均攤成本（存股族的真實報酬率）。費用率內扣於淨值，是看不見的複利殺手。</div>`;
+  <div class="small">成本殖利率＝年配息÷均攤成本（存股族的真實報酬率）。費用率內扣於淨值，是看不見的複利殺手。個股配息由⚡按鈕自動估算；ETF配息依發行商公告手動維護（一年僅變動數次）。</div>`;
  // 壓測
  const d=S.stress/100;let sv=0,sl=0;
  S.holdings.forEach(h=>{const b=h.cat==="槓桿"?2:1;const v=Math.max(0,h.shares*h.price*(1+b*d));sv+=v;if(h.cat==="槓桿")sl+=v;});
