@@ -89,7 +89,7 @@ const DEF = {
  checks:[false,false,false,false,false,false]
 };
 let S; try{S=Object.assign(structuredClone(DEF),JSON.parse(localStorage.getItem("cockpit_v5")||"{}"));}catch(e){S=structuredClone(DEF);}
-const save=()=>localStorage.setItem("cockpit_v5",JSON.stringify(S));
+const save=()=>{S._ts=Date.now();localStorage.setItem("cockpit_v5",JSON.stringify(S));};
 
 const BATCHES=[
  {name:"舊備用金",amt:297000,idx:40000,extra:"或00981A≤28.5",dl:"2026-07-31"},
@@ -206,6 +206,72 @@ async function fetchMA(){
  }
 }
 
+// ══════════ 多裝置同步（GitHub Gist）══════════
+const gh=t=>({Authorization:"Bearer "+t,"Accept":"application/vnd.github+json","Content-Type":"application/json"});
+function packData(){const d=JSON.parse(JSON.stringify(S));delete d.ghToken;d._ts=Date.now();return JSON.stringify(d);}
+async function findGist(tok){
+ const r=await fetch("https://api.github.com/gists?per_page=100",{headers:gh(tok)});
+ if(!r.ok)throw new Error("Token無效或權限不足(HTTP "+r.status+")");
+ const arr=await r.json();
+ const g=arr.find(x=>x.files&&x.files["cockpit_data.json"]);
+ return g?g.id:null;
+}
+window.setTok=v=>{S.ghToken=v.trim();save();};
+window.cloudSave=async()=>{
+ const el=document.getElementById("syncmsg");
+ if(!S.ghToken){el.textContent="請先貼上GitHub Token（見下方教學）";el.className="msg bad";return;}
+ el.textContent="上傳中…";el.className="msg warn";
+ try{
+  let id=S.gistId||await findGist(S.ghToken);
+  const body=JSON.stringify({description:"投資駕駛艙資料（自動同步）",public:false,files:{"cockpit_data.json":{content:packData()}}});
+  const r=await fetch(id?"https://api.github.com/gists/"+id:"https://api.github.com/gists",{method:id?"PATCH":"POST",headers:gh(S.ghToken),body});
+  if(!r.ok)throw new Error("HTTP "+r.status);
+  const j=await r.json();S.gistId=j.id;S.lastSync=new Date().toLocaleString("zh-TW");save();
+  el.textContent="✅ 已上傳雲端（"+S.lastSync+"）。其他裝置貼同一Token按「下載」即可同步。";el.className="msg ok";
+ }catch(e){el.textContent="❌ 上傳失敗："+e.message;el.className="msg bad";}
+};
+window.cloudLoad=async()=>{
+ const el=document.getElementById("syncmsg");
+ if(!S.ghToken){el.textContent="請先貼上GitHub Token（見下方教學）";el.className="msg bad";return;}
+ el.textContent="下載中…";el.className="msg warn";
+ try{
+  const id=S.gistId||await findGist(S.ghToken);
+  if(!id){el.textContent="雲端尚無資料——請先在已編輯好的裝置按「上傳」。";el.className="msg warn";return;}
+  const r=await fetch("https://api.github.com/gists/"+id,{headers:gh(S.ghToken)});
+  if(!r.ok)throw new Error("HTTP "+r.status);
+  const j=await r.json();
+  const d=JSON.parse(j.files["cockpit_data.json"].content);
+  const tok=S.ghToken;Object.assign(S,d);S.ghToken=tok;S.gistId=id;
+  save();renderAll();
+  const el2=document.getElementById("syncmsg");
+  el2.textContent="✅ 已同步雲端資料（資料時間："+new Date(d._ts).toLocaleString("zh-TW")+"）";el2.className="msg ok";
+ }catch(e){el.textContent="❌ 下載失敗："+e.message;el.className="msg bad";}
+};
+window.exportFile=()=>{
+ const a=document.createElement("a");
+ a.href=URL.createObjectURL(new Blob([packData()],{type:"application/json"}));
+ a.download="cockpit_backup_"+S.today+".json";a.click();
+};
+window.importFile=inp=>{
+ const f=inp.files[0];if(!f)return;
+ const rd=new FileReader();
+ rd.onload=()=>{try{const d=JSON.parse(rd.result);const tok=S.ghToken;Object.assign(S,d);S.ghToken=tok;save();renderAll();
+  document.getElementById("syncmsg").textContent="✅ 已匯入檔案資料";document.getElementById("syncmsg").className="msg ok";
+ }catch(e){alert("檔案格式錯誤");}};
+ rd.readAsText(f);
+};
+async function checkCloud(){
+ if(!S.ghToken)return;
+ try{
+  const id=S.gistId||await findGist(S.ghToken);if(!id)return;
+  const r=await fetch("https://api.github.com/gists/"+id,{headers:gh(S.ghToken)});if(!r.ok)return;
+  const j=await r.json();const d=JSON.parse(j.files["cockpit_data.json"].content);
+  const el=document.getElementById("syncmsg");if(!el)return;
+  if(d._ts&&(!S._ts||d._ts>S._ts+60000)){
+   el.innerHTML="☁️ 雲端有較新資料（"+new Date(d._ts).toLocaleString("zh-TW")+"）— 建議按「從雲端下載」";el.className="msg warn";}
+ }catch(e){}
+}
+
 // ══════════ 畫面 ══════════
 function sec(id,title,open,inner){return `<details ${open?"open":""}><summary>${title}</summary><div class="bd" id="${id}">${inner}</div></details>`;}
 function inp(path,val,step){return `<input type="number" step="${step||"any"}" value="${val}" oninput="setV('${path}',this.value)">`;}
@@ -234,6 +300,22 @@ function renderAll(){
     <label>台股加權指數${inp("taiex",S.taiex)}</label>
     <label>今日日期<input type="date" value="${S.today}" onchange="setDate(this.value)"></label>
    </div>`),
+  sec("s1b","①b ☁️ 多裝置同步與備份",false,`
+   <div class="g2">
+    <button class="btn" style="background:#0e6e56" onclick="cloudSave()">☁️ 上傳到雲端</button>
+    <button class="btn" onclick="cloudLoad()">☁️ 從雲端下載</button>
+   </div>
+   <div id="syncmsg" class="small" style="margin-top:6px">${S.lastSync?"上次上傳："+S.lastSync:"尚未同步"}</div>
+   <label style="margin-top:10px">GitHub Token（每台裝置貼一次，只存在本機）
+    <input type="password" value="${S.ghToken||""}" placeholder="ghp_xxxx…" onchange="setTok(this.value)">
+   </label>
+   <div class="small" style="margin-top:6px"><b>一次性設定（3分鐘）：</b>github.com登入 → 右上頭像 Settings → 最下方 Developer settings → Personal access tokens → <b>Tokens (classic)</b> → Generate new token (classic) → 只勾選 <b>gist</b> → Generate → 複製貼到上方欄位。之後每台裝置貼同一組Token即可互通。</div>
+   <div class="g2" style="margin-top:10px">
+    <button class="btn2" onclick="exportFile()">💾 匯出備份檔</button>
+    <button class="btn2" onclick="document.getElementById('impFile').click()">📂 匯入備份檔</button>
+   </div>
+   <input type="file" id="impFile" accept=".json" style="display:none" onchange="importFile(this)">
+   <div class="small" style="margin-top:6px">使用習慣：<b>編輯完按上傳、換裝置先下載</b>。資料存在你自己GitHub的私密Gist（不公開列表、無姓名資訊、Token只留在各裝置本機）。完全不想上雲則改用匯出/匯入檔案。</div>`),
   sec("s2","② 智慧健檢（自動紅旗）",true,`<div id="healthBox"></div>`),
   sec("s3","③ 曝險再平衡引擎",true,`
    <div class="track"><div class="band" id="band"></div><div class="needle" id="needle"></div></div>
@@ -398,10 +480,10 @@ function renderOut(){
  // 貸款
  document.getElementById("loanBox").innerHTML=`<table><tr><th>貸款</th><th>本金餘額</th><th>利率%</th><th>年</th><th>月</th><th>月繳</th><th>首年利息</th></tr>`+
   S.loans.map((l,i)=>`<tr><td>${l.name}</td>
-   <td><input style="width:100px" value="${l.p}" oninput="setL(${i},'p',this.value)"></td>
-   <td><input style="width:55px" value="${l.rate}" oninput="setL(${i},'rate',this.value)"></td>
-   <td><input style="width:48px" value="${l.y}" oninput="setL(${i},'y',this.value)"></td>
-   <td><input style="width:48px" value="${l.m}" oninput="setL(${i},'m',this.value)"></td>
+   <td><input style="width:100px" value="${l.p}" onchange="setL(${i},'p',this.value)"></td>
+   <td><input style="width:55px" value="${l.rate}" onchange="setL(${i},'rate',this.value)"></td>
+   <td><input style="width:48px" value="${l.y}" onchange="setL(${i},'y',this.value)"></td>
+   <td><input style="width:48px" value="${l.m}" onchange="setL(${i},'m',this.value)"></td>
    <td class="mono">${fmt(pmt(l.p,l.rate,l.y,l.m))}</td>
    <td class="mono">${wan(l.p*l.rate/100)}</td></tr>`).join("")+
   `</table><div class="row" style="font-weight:700"><span>月繳合計（自動加總）</span><span class="mono pr">${fmt(c.monthly)}元</span></div>
@@ -445,7 +527,7 @@ function renderOut(){
   <div class="card"><div class="l">ETF年持有費用損耗</div><div class="v pr">${wan(feeDrag)}</div></div>
   <div class="card"><div class="l">配息−費用 淨流入</div><div class="v ${aDiv-feeDrag>=0?"pg":"pr"}">${wan(aDiv-feeDrag)}</div></div></div>
   <table style="margin-top:10px"><tr><th>標的</th><th>配息/股</th><th>年配息</th><th>成本殖利率</th><th>費用率%</th><th>年費用</th></tr>`+
-  S.holdings.map((h,i)=>(h.div>0||(h.fee||0)>0)?`<tr><td>${h.name}</td><td><input style="width:52px;padding:2px 4px" value="${h.div}" oninput="setH(${i},'div',this.value)"></td><td class="mono">${wan(h.shares*h.div)}</td><td class="mono ${h.div/h.cost>=0.05?"pg":""}">${h.div>0?pc(h.div/h.cost):"—"}</td><td><input style="width:46px;padding:2px 4px" value="${h.fee||0}" oninput="setH(${i},'fee',this.value)"></td><td class="mono">${(h.fee||0)>0?wan(h.shares*h.price*h.fee/100):"—"}</td></tr>`:"").join("")+`</table>
+  S.holdings.map((h,i)=>(h.div>0||(h.fee||0)>0)?`<tr><td>${h.name}</td><td><input style="width:52px;padding:2px 4px" value="${h.div}" onchange="setH(${i},'div',this.value)"></td><td class="mono">${wan(h.shares*h.div)}</td><td class="mono ${h.div/h.cost>=0.05?"pg":""}">${h.div>0?pc(h.div/h.cost):"—"}</td><td><input style="width:46px;padding:2px 4px" value="${h.fee||0}" onchange="setH(${i},'fee',this.value)"></td><td class="mono">${(h.fee||0)>0?wan(h.shares*h.price*h.fee/100):"—"}</td></tr>`:"").join("")+`</table>
   <div class="small">成本殖利率＝年配息÷均攤成本（存股族的真實報酬率）。費用率內扣於淨值，是看不見的複利殺手。個股配息由⚡按鈕自動估算；ETF配息依發行商公告手動維護（一年僅變動數次）。</div>`;
  // 壓測
  const d=S.stress/100;let sv=0,sl=0;
@@ -481,7 +563,7 @@ function renderOut(){
    else if(days<0){st="⏰ 已逾期→強制執行";cl="color:#b91c1c;font-weight:700";}
    else if(days<=14){st=`⚠️ ${days}天後到期`;cl="color:#92400e;font-weight:600";}
    else{st=`${days}天到期`;cl="color:#a8a29e";}
-   return `<tr style="${b.done?"opacity:.5":""}"><td>${b.name}<div class="small">${b.extra||""}</div></td><td class="mono">${wan(b.amt)}</td><td><input style="width:72px;padding:3px 5px;font-size:12px" value="${b.idx}" oninput="setBatch(${bi},'idx',this.value)"></td><td class="mono">${b.dl.slice(5)}</td><td style="${cl}">${st}</td><td><input type="checkbox" ${b.done?"checked":""} onchange="setBatchDone(${bi},this.checked)"></td></tr>`;}).join("")+`</table>
+   return `<tr style="${b.done?"opacity:.5":""}"><td>${b.name}<div class="small">${b.extra||""}</div></td><td class="mono">${wan(b.amt)}</td><td><input style="width:72px;padding:3px 5px;font-size:12px" value="${b.idx}" onchange="setBatch(${bi},'idx',this.value)"></td><td class="mono">${b.dl.slice(5)}</td><td style="${cl}">${st}</td><td><input type="checkbox" ${b.done?"checked":""} onchange="setBatchDone(${bi},this.checked)"></td></tr>`;}).join("")+`</table>
   <div class="small">觸發指數可直接修改（滾動式調整）；執行後打勾留下紀錄。</div>
   <div class="msg warn" style="font-size:12px">下次季末再平衡：${(function(){const q=["2026-09-30","2026-12-31","2027-03-31","2027-06-30"].find(x=>new Date(x)>=tN);return q?q+"（"+Math.ceil((new Date(q)-tN)/86400000)+"天後）":"—";})()}</div>`;
  // 減碼+Glide
@@ -499,9 +581,9 @@ function renderOut(){
  document.getElementById("holdBox").innerHTML=`<table style="min-width:520px"><tr><th>標的</th><th>股數</th><th>均攤</th><th>現價</th><th>市值</th><th>損益</th></tr>`+
   S.holdings.map((h,i)=>{const v=h.shares*h.price,pl=v-h.shares*h.cost;
    return `<tr><td><span class="sw" style="background:${CAT_C[h.cat]}"></span>${h.name}<span style="color:#a8a29e;margin-left:4px">${h.code}</span></td>
-    <td><input style="width:82px" value="${h.shares}" oninput="setH(${i},'shares',this.value)"></td>
-    <td><input style="width:64px" value="${h.cost}" oninput="setH(${i},'cost',this.value)"></td>
-    <td><input style="width:64px" value="${h.price}" oninput="setH(${i},'price',this.value)"></td>
+    <td><input style="width:82px" value="${h.shares}" onchange="setH(${i},'shares',this.value)"></td>
+    <td><input style="width:64px" value="${h.cost}" onchange="setH(${i},'cost',this.value)"></td>
+    <td><input style="width:64px" value="${h.price}" onchange="setH(${i},'price',this.value)"></td>
     <td class="mono">${wan(v)}</td><td class="mono ${pl>=0?"pg":"pr"}">${pl>=0?"+":""}${wan(pl)}</td></tr>`;}).join("")+`</table>`;
  // 提領
  document.getElementById("wBox").innerHTML=`<div class="g2" style="margin-top:10px">
@@ -529,6 +611,7 @@ function renderOut(){
 
 }
 renderAll();
+checkCloud();
 </script>
 </body>
 </html>
