@@ -154,6 +154,7 @@ async function autoFetch(){
   const last=ix[ix.length-1];
   if(last&&last.TAIEX)S.taiex=parseFloat(String(last.TAIEX).replace(/,/g,""));
   S.today=new Date().toISOString().slice(0,10);
+  S.lastFetchD=S.today;
   let vixOk=false;
   try{const vx=await getJSON("https://cdn.cboe.com/api/global/delayed_quotes/quotes/_VIX.json",log);
    if(vx&&vx.data&&vx.data.last>0){S.vix=+(+vx.data.last).toFixed(1);vixOk=true;}}catch(e){}
@@ -170,106 +171,53 @@ async function autoFetch(){
  }
 }
 
-// ══════════ 均線自動計算（抓13個月歷史收盤）══════════
+// ══════════ 均線自動計算（真實日K：開高低收）══════════
 async function fetchMA(){
  const el=document.getElementById("mamsg");
- el.textContent="抓取13個月歷史資料計算均線中…（約10-30秒，請稍候）";el.className="msg warn";
+ el.textContent="抓取13個月台股日K（開高低收）計算中…（約10-30秒）";el.className="msg warn";
  try{
-  const closes=[];const now=new Date(S.today);
+  const rows=[];const now=new Date(S.today);
   for(let k=12;k>=0;k--){
    const d=new Date(now.getFullYear(),now.getMonth()-k,1);
    const ds=d.getFullYear()+String(d.getMonth()+1).padStart(2,"0")+"01";
    try{
-    const j=await getJSONfast("https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date="+ds+"&response=json");
-    if(j&&j.data)j.data.forEach(r=>{const v=parseFloat(String(r[4]).replace(/,/g,""));if(v>0)closes.push(v);});
+    const j=await getJSONfast("https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST?date="+ds+"&response=json");
+    if(j&&j.data)j.data.forEach(r=>{
+     const p=String(r[0]).split("/");const dt=new Date(+p[0]+1911,+p[1]-1,+p[2]);
+     const f=x=>parseFloat(String(x).replace(/,/g,""));
+     const c=f(r[4]);if(c>0)rows.push({t:dt,h:f(r[2]),l:f(r[3]),c:c});});
    }catch(e){}
   }
-  if(closes.length<240)throw new Error("歷史資料不足（僅"+closes.length+"天，需240天）");
+  if(rows.length<240)throw new Error("歷史資料不足（僅"+rows.length+"天）");
+  const closes=rows.map(r=>r.c);
   const ma=n=>Math.round(closes.slice(-n).reduce((a,b)=>a+b,0)/n);
   S.ma5=ma(5);S.ma20=ma(20);S.ma60=ma(60);S.ma120=ma(120);S.ma240=ma(240);
-  const wk=[];for(let i=closes.length;i>0;i-=5)wk.unshift(closes.slice(Math.max(0,i-5),i));
-  const wc=wk.map(w=>w[w.length-1]),wh=wk.map(w=>Math.max(...w)),wl=wk.map(w=>Math.min(...w));
-  let g=0,l=0;for(let i=wc.length-14;i<wc.length;i++){const d2=wc[i]-wc[i-1];if(d2>0)g+=d2;else l-=d2;}
-  S.rsiW=Math.round(g+l>0?100*g/(g+l):50);
+  const wkMap=new Map();
+  rows.forEach(r=>{const d=new Date(r.t);const off=(d.getDay()+6)%7;d.setDate(d.getDate()-off);
+   const k=d.getFullYear()+"-"+d.getMonth()+"-"+d.getDate();
+   const w=wkMap.get(k);
+   if(!w)wkMap.set(k,{h:r.h,l:r.l,c:r.c});
+   else{w.h=Math.max(w.h,r.h);w.l=Math.min(w.l,r.l);w.c=r.c;}});
+  const wks=[...wkMap.values()];
+  const wc=wks.map(w=>w.c),wh=wks.map(w=>w.h),wl=wks.map(w=>w.l);
+  let g=0,l=0;
+  for(let i=1;i<=14;i++){const d2=wc[i]-wc[i-1];if(d2>0)g+=d2;else l-=d2;}
+  g/=14;l/=14;
+  for(let i=15;i<wc.length;i++){const d2=wc[i]-wc[i-1];g=(g*13+(d2>0?d2:0))/14;l=(l*13+(d2<0?-d2:0))/14;}
+  S.rsiW=Math.round(l===0?100:100-100/(1+g/l));
   let K=50,Dv=50;
-  for(let i=Math.max(9,wc.length-20);i<wc.length;i++){
+  for(let i=8;i<wc.length;i++){
    const hh=Math.max(...wh.slice(i-8,i+1)),ll=Math.min(...wl.slice(i-8,i+1));
    const rsv=hh>ll?(wc[i]-ll)/(hh-ll)*100:50;K=K*2/3+rsv/3;Dv=Dv*2/3+K/3;}
   S.kdW=Math.round(K);
   save();renderAll();
   const el2=document.getElementById("mamsg");
-  el2.textContent=`✅ 已自動計算（${closes.length}交易日）：5MA ${fmt(S.ma5)}｜20MA ${fmt(S.ma20)}｜60MA ${fmt(S.ma60)}｜120MA ${fmt(S.ma120)}｜240MA ${fmt(S.ma240)}｜週RSI≈${S.rsiW}｜週KD≈${S.kdW}（週指標以收盤近似估算）`;
+  el2.textContent=`✅ 真實日K計算完成（${rows.length}交易日）：5MA ${fmt(S.ma5)}｜20MA ${fmt(S.ma20)}｜60MA ${fmt(S.ma60)}｜120MA ${fmt(S.ma120)}｜240MA ${fmt(S.ma240)}｜週RSI ${S.rsiW}｜週K ${S.kdW}（Wilder與9,3,3標準參數；不同App間±1-3為正常差異）`;
   el2.className="msg ok";
  }catch(e){
-  el.textContent="❌ 均線抓取失敗："+(e.message||e)+"。可能為流量限制，稍後再試或手動填入。";
+  el.textContent="❌ 抓取失敗："+(e.message||e)+"。稍後再試或手動填入。";
   el.className="msg bad";
  }
-}
-
-// ══════════ 多裝置同步（GitHub Gist）══════════
-const gh=t=>({Authorization:"Bearer "+t,"Accept":"application/vnd.github+json","Content-Type":"application/json"});
-function packData(){const d=JSON.parse(JSON.stringify(S));delete d.ghToken;d._ts=Date.now();return JSON.stringify(d);}
-async function findGist(tok){
- const r=await fetch("https://api.github.com/gists?per_page=100",{headers:gh(tok)});
- if(!r.ok)throw new Error("Token無效或權限不足(HTTP "+r.status+")");
- const arr=await r.json();
- const g=arr.find(x=>x.files&&x.files["cockpit_data.json"]);
- return g?g.id:null;
-}
-window.setTok=v=>{S.ghToken=v.trim();save();};
-window.cloudSave=async()=>{
- const el=document.getElementById("syncmsg");
- if(!S.ghToken){el.textContent="請先貼上GitHub Token（見下方教學）";el.className="msg bad";return;}
- el.textContent="上傳中…";el.className="msg warn";
- try{
-  let id=S.gistId||await findGist(S.ghToken);
-  const body=JSON.stringify({description:"投資駕駛艙資料（自動同步）",public:false,files:{"cockpit_data.json":{content:packData()}}});
-  const r=await fetch(id?"https://api.github.com/gists/"+id:"https://api.github.com/gists",{method:id?"PATCH":"POST",headers:gh(S.ghToken),body});
-  if(!r.ok)throw new Error("HTTP "+r.status);
-  const j=await r.json();S.gistId=j.id;S.lastSync=new Date().toLocaleString("zh-TW");save();
-  el.textContent="✅ 已上傳雲端（"+S.lastSync+"）。其他裝置貼同一Token按「下載」即可同步。";el.className="msg ok";
- }catch(e){el.textContent="❌ 上傳失敗："+e.message;el.className="msg bad";}
-};
-window.cloudLoad=async()=>{
- const el=document.getElementById("syncmsg");
- if(!S.ghToken){el.textContent="請先貼上GitHub Token（見下方教學）";el.className="msg bad";return;}
- el.textContent="下載中…";el.className="msg warn";
- try{
-  const id=S.gistId||await findGist(S.ghToken);
-  if(!id){el.textContent="雲端尚無資料——請先在已編輯好的裝置按「上傳」。";el.className="msg warn";return;}
-  const r=await fetch("https://api.github.com/gists/"+id,{headers:gh(S.ghToken)});
-  if(!r.ok)throw new Error("HTTP "+r.status);
-  const j=await r.json();
-  const d=JSON.parse(j.files["cockpit_data.json"].content);
-  const tok=S.ghToken;Object.assign(S,d);S.ghToken=tok;S.gistId=id;
-  save();renderAll();
-  const el2=document.getElementById("syncmsg");
-  el2.textContent="✅ 已同步雲端資料（資料時間："+new Date(d._ts).toLocaleString("zh-TW")+"）";el2.className="msg ok";
- }catch(e){el.textContent="❌ 下載失敗："+e.message;el.className="msg bad";}
-};
-window.exportFile=()=>{
- const a=document.createElement("a");
- a.href=URL.createObjectURL(new Blob([packData()],{type:"application/json"}));
- a.download="cockpit_backup_"+S.today+".json";a.click();
-};
-window.importFile=inp=>{
- const f=inp.files[0];if(!f)return;
- const rd=new FileReader();
- rd.onload=()=>{try{const d=JSON.parse(rd.result);const tok=S.ghToken;Object.assign(S,d);S.ghToken=tok;save();renderAll();
-  document.getElementById("syncmsg").textContent="✅ 已匯入檔案資料";document.getElementById("syncmsg").className="msg ok";
- }catch(e){alert("檔案格式錯誤");}};
- rd.readAsText(f);
-};
-async function checkCloud(){
- if(!S.ghToken)return;
- try{
-  const id=S.gistId||await findGist(S.ghToken);if(!id)return;
-  const r=await fetch("https://api.github.com/gists/"+id,{headers:gh(S.ghToken)});if(!r.ok)return;
-  const j=await r.json();const d=JSON.parse(j.files["cockpit_data.json"].content);
-  const el=document.getElementById("syncmsg");if(!el)return;
-  if(d._ts&&(!S._ts||d._ts>S._ts+60000)){
-   el.innerHTML="☁️ 雲端有較新資料（"+new Date(d._ts).toLocaleString("zh-TW")+"）— 建議按「從雲端下載」";el.className="msg warn";}
- }catch(e){}
 }
 
 // ══════════ 畫面 ══════════
@@ -296,6 +244,7 @@ function renderAll(){
   sec("s1","① 今日市況（一鍵自動抓取）",true,`
    <button class="btn" onclick="autoFetch()">⚡ 一鍵抓取今日收盤價＋大盤指數</button>
    <div id="fmsg" class="small"></div>
+   <div class="small">上次抓取：${S.lastFetchD||"尚未"}｜均線更新：${S.lastMAD||"尚未"}｜開啟頁面自動更新（證交所盤後資料14:30後為當日）</div>
    <div class="g2" style="margin-top:10px">
     <label>台股加權指數${inp("taiex",S.taiex)}</label>
     <label>今日日期<input type="date" value="${S.today}" onchange="setDate(this.value)"></label>
@@ -326,7 +275,7 @@ function renderAll(){
    </label>
    <div style="display:flex;gap:8px;margin-top:6px" id="tolBtns"></div>`),
   sec("s4","④ 技術溫度計（台股均線＋VIX＋景氣燈號）",true,`
-   <button class="btn" style="background:#0e6e56;margin-bottom:8px" onclick="fetchMA()">📐 一鍵計算均線＋週RSI/KD（每週按一次即可）</button>
+   <button class="btn" style="background:#0e6e56;margin-bottom:8px" onclick="fetchMA()">📐 一鍵計算均線＋週RSI/KD（真實日K高低點，每週按一次）</button>
    <div id="mamsg" class="small"></div>
    <div class="g5">
     <label>週線5MA${inp("ma5",S.ma5)}</label><label>月線20MA${inp("ma20",S.ma20)}</label>
@@ -429,6 +378,8 @@ function renderOut(){
  if(c.ratio>(S.bandTarget+S.tolerance)/100)flags.push(["bad","曝險比超出容忍帶 — 依③引擎修剪"]);
  const runway=(S.investCash+S.survivalFund)/c.monthly;
  if(runway<12)flags.push(["warn",`現金僅可支撐月繳 ${runway.toFixed(0)} 個月（<12月警戒）`]);
+ if(S.taiex<S.ma20&&S.taiex>=S.ma60)flags.push(["warn",`台股跌破月線20MA（${fmt(S.ma20)}）— 進入加碼觀察區，尚未觸發（你的加碼線在季線區，見⑬）`]);
+ if(S.taiex<S.ma60&&S.taiex>=S.ma240)flags.push(["bad",`🔥 台股跌破季線60MA（${fmt(S.ma60)}）— 第二批加碼執行區！立即對照⑬觸發價`]);
  if(S.taiex<S.ma240)flags.push(["bad","台股跌破年線240MA — 停止一切加碼"]);
  if(S.light==="紅燈")flags.push(["warn","景氣紅燈 — 歷史過熱區，配合修剪不追高"]);
  let tsmcE=0;S.holdings.forEach(h=>{const w=TSMCW[h.code];if(w)tsmcE+=h.shares*h.price*w;});
@@ -564,7 +515,7 @@ function renderOut(){
    else if(days<=14){st=`⚠️ ${days}天後到期`;cl="color:#92400e;font-weight:600";}
    else{st=`${days}天到期`;cl="color:#a8a29e";}
    return `<tr style="${b.done?"opacity:.5":""}"><td>${b.name}<div class="small">${b.extra||""}</div></td><td class="mono">${wan(b.amt)}</td><td><input style="width:72px;padding:3px 5px;font-size:12px" value="${b.idx}" onchange="setBatch(${bi},'idx',this.value)"></td><td class="mono">${b.dl.slice(5)}</td><td style="${cl}">${st}</td><td><input type="checkbox" ${b.done?"checked":""} onchange="setBatchDone(${bi},this.checked)"></td></tr>`;}).join("")+`</table>
-  <div class="small">觸發指數可直接修改（滾動式調整）；執行後打勾留下紀錄。</div>
+  <div class="small">觸發指數可直接修改；建議滾動對齊均線：季線${fmt(S.ma60)}／半年線${fmt(S.ma120)}／年線${fmt(S.ma240)}。執行後打勾留紀錄。</div>
   <div class="msg warn" style="font-size:12px">下次季末再平衡：${(function(){const q=["2026-09-30","2026-12-31","2027-03-31","2027-06-30"].find(x=>new Date(x)>=tN);return q?q+"（"+Math.ceil((new Date(q)-tN)/86400000)+"天後）":"—";})()}</div>`;
  // 減碼+Glide
  document.getElementById("trimBox").innerHTML=TRIMS.map(t=>`<div class="row" style="${S.taiex>=t[0]?"color:#b91c1c;font-weight:600":""}"><span class="mono">${fmt(t[0])}</span><span style="text-align:right;flex:1;margin-left:14px">${S.taiex>=t[0]?"🔔 已到達 — ":""}${t[1]}</span></div>`).join("")+
@@ -612,6 +563,11 @@ function renderOut(){
 }
 renderAll();
 checkCloud();
+(async()=>{
+ const td=new Date().toISOString().slice(0,10);
+ if(S.lastFetchD!==td){try{await autoFetch();}catch(e){}}
+ if(!S.lastMAD||(new Date(td)-new Date(S.lastMAD))/86400000>=5){try{await fetchMA();}catch(e){}}
+})();
 </script>
 </body>
 </html>
