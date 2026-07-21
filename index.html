@@ -220,6 +220,72 @@ async function fetchMA(){
  }
 }
 
+// ══════════ 多裝置同步（GitHub Gist）══════════
+const gh=t=>({Authorization:"Bearer "+t,"Accept":"application/vnd.github+json","Content-Type":"application/json"});
+function packData(){const d=JSON.parse(JSON.stringify(S));delete d.ghToken;d._ts=Date.now();return JSON.stringify(d);}
+async function findGist(tok){
+ const r=await fetch("https://api.github.com/gists?per_page=100",{headers:gh(tok)});
+ if(!r.ok)throw new Error("Token無效或權限不足(HTTP "+r.status+")");
+ const arr=await r.json();
+ const g=arr.find(x=>x.files&&x.files["cockpit_data.json"]);
+ return g?g.id:null;
+}
+window.setTok=v=>{S.ghToken=v.trim();S.gistId=null;save();};
+window.cloudSave=async()=>{
+ const el=document.getElementById("syncmsg");
+ if(!S.ghToken){el.textContent="請先貼上GitHub Token（見下方教學）";el.className="msg bad";return;}
+ el.textContent="上傳中…";el.className="msg warn";
+ try{
+  let id=S.gistId||await findGist(S.ghToken);
+  const body=JSON.stringify({description:"投資駕駛艙資料（自動同步）",public:false,files:{"cockpit_data.json":{content:packData()}}});
+  const r=await fetch(id?"https://api.github.com/gists/"+id:"https://api.github.com/gists",{method:id?"PATCH":"POST",headers:gh(S.ghToken),body});
+  if(!r.ok)throw new Error("HTTP "+r.status);
+  const j=await r.json();S.gistId=j.id;S.lastSync=new Date().toLocaleString("zh-TW");save();
+  el.textContent="✅ 已上傳雲端（"+S.lastSync+"）。其他裝置貼同一Token按「下載」即可同步。";el.className="msg ok";
+ }catch(e){el.textContent="❌ 上傳失敗："+e.message;el.className="msg bad";}
+};
+window.cloudLoad=async()=>{
+ const el=document.getElementById("syncmsg");
+ if(!S.ghToken){el.textContent="請先貼上GitHub Token（見下方教學）";el.className="msg bad";return;}
+ el.textContent="下載中…";el.className="msg warn";
+ try{
+  const id=S.gistId||await findGist(S.ghToken);
+  if(!id){el.textContent="雲端尚無資料——請先在已編輯好的裝置按「上傳」。";el.className="msg warn";return;}
+  const r=await fetch("https://api.github.com/gists/"+id,{headers:gh(S.ghToken)});
+  if(!r.ok)throw new Error("HTTP "+r.status);
+  const j=await r.json();
+  const d=JSON.parse(j.files["cockpit_data.json"].content);
+  const tok=S.ghToken;Object.assign(S,d);S.ghToken=tok;S.gistId=id;
+  save();renderAll();
+  const el2=document.getElementById("syncmsg");
+  el2.textContent="✅ 已同步雲端資料（資料時間："+new Date(d._ts).toLocaleString("zh-TW")+"）";el2.className="msg ok";
+ }catch(e){el.textContent="❌ 下載失敗："+e.message;el.className="msg bad";}
+};
+window.exportFile=()=>{
+ const a=document.createElement("a");
+ a.href=URL.createObjectURL(new Blob([packData()],{type:"application/json"}));
+ a.download="cockpit_backup_"+S.today+".json";a.click();
+};
+window.importFile=inp=>{
+ const f=inp.files[0];if(!f)return;
+ const rd=new FileReader();
+ rd.onload=()=>{try{const d=JSON.parse(rd.result);const tok=S.ghToken;Object.assign(S,d);S.ghToken=tok;save();renderAll();
+  document.getElementById("syncmsg").textContent="✅ 已匯入檔案資料";document.getElementById("syncmsg").className="msg ok";
+ }catch(e){alert("檔案格式錯誤");}};
+ rd.readAsText(f);
+};
+async function checkCloud(){
+ if(!S.ghToken)return;
+ try{
+  const id=S.gistId||await findGist(S.ghToken);if(!id)return;
+  const r=await fetch("https://api.github.com/gists/"+id,{headers:gh(S.ghToken)});if(!r.ok)return;
+  const j=await r.json();const d=JSON.parse(j.files["cockpit_data.json"].content);
+  const el=document.getElementById("syncmsg");if(!el)return;
+  if(d._ts&&(!S._ts||d._ts>S._ts+60000)){
+   el.innerHTML="☁️ 雲端有較新資料（"+new Date(d._ts).toLocaleString("zh-TW")+"）— 建議按「從雲端下載」";el.className="msg warn";}
+ }catch(e){}
+}
+
 // ══════════ 畫面 ══════════
 function sec(id,title,open,inner){return `<details ${open?"open":""}><summary>${title}</summary><div class="bd" id="${id}">${inner}</div></details>`;}
 function inp(path,val,step){return `<input type="number" step="${step||"any"}" value="${val}" oninput="setV('${path}',this.value)">`;}
