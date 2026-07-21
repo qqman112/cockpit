@@ -131,15 +131,16 @@ function compute(){
 
 // ══════════ 自動抓取 ══════════
 async function tryFetch(u){const r=await fetch(u,{cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);return r.json();}
+function bust(u){return u+(u.includes("?")?"&":"?")+"_cb="+Date.now();}
 async function getJSON(u,log){
- try{log.push("直連");return await tryFetch(u);}
+ try{log.push("直連");return await tryFetch(bust(u));}
  catch(e1){log.push("直連失敗("+(e1.message||"blocked")+")→代理1");
-  try{return await tryFetch("https://api.allorigins.win/raw?url="+encodeURIComponent(u));}
+  try{return await tryFetch("https://api.allorigins.win/raw?url="+encodeURIComponent(bust(u)));}
   catch(e2){log.push("代理1失敗→代理2");
-   return await tryFetch("https://corsproxy.io/?url="+encodeURIComponent(u));}}}
+   return await tryFetch("https://corsproxy.io/?url="+encodeURIComponent(bust(u)));}}}
 let _chan=0;
 async function getJSONfast(u){
- const chans=[x=>x,x=>"https://api.allorigins.win/raw?url="+encodeURIComponent(x),x=>"https://corsproxy.io/?url="+encodeURIComponent(x)];
+ const chans=[x=>bust(x),x=>"https://api.allorigins.win/raw?url="+encodeURIComponent(bust(x)),x=>"https://corsproxy.io/?url="+encodeURIComponent(bust(x))];
  for(let c=_chan;c<3;c++){try{const r=await tryFetch(chans[c](u));_chan=c;return r;}catch(e){}}
  throw new Error("三通道皆失敗");
 }
