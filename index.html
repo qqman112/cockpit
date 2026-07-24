@@ -477,11 +477,25 @@ function renderOut(){
  const verdict=r>=3?"🔴 多項過熱：只賣不買（除非批次到期）":g>=4?"🟢 深度超跌：加碼溫度最佳":"🟡 中性：照觸發條件執行";
  document.getElementById("thermoBox").innerHTML=lights.map(l=>`<div class="lt"><span class="dot ${l[0]}"></span>${l[1]}</div>`).join("")+`<div class="msg" style="background:#fafaf9;color:#1c1917;margin-top:8px">${verdict}</div>`;
  // 均線防線
- document.getElementById("maBox").innerHTML=[["季線 60MA",S.ma60,"執行對應批次加碼（0050）"],["半年線 120MA",S.ma120,"第三、四批全數執行"],["年線 240MA",S.ma240,"🛑 停止一切加碼，保現金防守"]].map(rw=>{
+ (function(){
+ const b1=S.batches[0]&&S.batches[0].done, b2=S.batches[1]&&S.batches[1].done;
+ const b3=S.batches[2]&&S.batches[2].done, b4=S.batches[3]&&S.batches[3].done;
+ let seasonAct;
+ if(b1&&b2)seasonAct="✅ 已於此防線觸發執行（備用金＋第二批共129.7萬）— 此線任務完成，密切觀察下一道防線";
+ else if(S.taiex<S.ma60)seasonAct="🔥 已跌破，若備用金／第二批尚未執行請立即檢查⑬";
+ else seasonAct="尚未觸及；跌破時執行備用金／信貸第二批（合計129.7萬）";
+ let halfAct;
+ if(b3&&b4)halfAct="✅ 第三、四批已全數執行";
+ else if(b3&&!b4)halfAct="第三批已執行；第四批52.9萬尚待觸發（≤"+fmt(S.batches[3]?S.batches[3].idx:37000)+"或10/31）";
+ else if(!b3&&b4)halfAct="第四批已提前執行；第三批80萬尚待觸發（≤"+fmt(S.batches[2]?S.batches[2].idx:40000)+"或09/30）";
+ else halfAct="尚待執行：第三批80萬（≤"+fmt(S.batches[2]?S.batches[2].idx:40000)+"或09/30）／第四批52.9萬（≤"+fmt(S.batches[3]?S.batches[3].idx:37000)+"或10/31）";
+ const rows=[["季線 60MA",S.ma60,seasonAct],["半年線 120MA",S.ma120,halfAct],["年線 240MA",S.ma240,"🛑 停止一切加碼，保現金防守（最後防線，不論批次是否用完）"]];
+ document.getElementById("maBox").innerHTML=rows.map(rw=>{
   const d=rw[1]/S.taiex-1;let sv=0;
-  S.holdings.forEach(h=>{const b=h.cat==="槓桿"?2:1;sv+=Math.max(0,h.shares*h.price*(1+b*d));});
+  S.holdings.forEach(h=>{const beta=h.cat==="槓桿"?2:1;sv+=Math.max(0,h.shares*h.price*(1+beta*d));});
   const pnl=sv-c.cost,brk=S.taiex<rw[1];
-  return `<div class="row" style="${brk?"color:#b91c1c":""}"><span><b>${brk?"🚨已跌破 ":""}${rw[0]} ${fmt(rw[1])}</b><div class="small">${rw[2]}</div></span><span class="mono" style="text-align:right">${pc(d)}<br><span class="${pnl>=0?'pg':'pr'}">${pnl>=0?"+":""}${wan(pnl)}</span></span></div>`;}).join("");
+  return `<div class="row" style="${brk?"color:#b91c1c":""}"><span><b>${brk?"🚨已跌破 ":""}${rw[0]} ${fmt(rw[1])}</b><div class="small">${rw[2]}</div></span><span class="mono" style="text-align:right;white-space:nowrap">${pc(d)}<br><span class="${pnl>=0?'pg':'pr'}">${pnl>=0?"+":""}${wan(pnl)}</span></span></div>`;}).join("");
+ })();
  // 換倉
  const mkSwap=(cur,base,sn,bn)=>{const p=cur/base-1;return {p,good:p>0.015,txt:p>0.015?`✅ ${sn}相對貴 ${pc(p)} → 今天適合賣${sn}換${bn}`:`— 偏差 ${pc(p)}，未達+1.5%，再等`,cur};};
  const sw=[["00981A → 0050",mkSwap(px("00981A")/px("0050"),S.base981,"00981A","0050")],["00631L → 00685L",mkSwap(px("00631L")/px("00685L"),S.base631,"00631L","00685L")]];
