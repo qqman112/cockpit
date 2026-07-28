@@ -55,7 +55,7 @@ td input{padding:3px 5px;font-size:12px}
 <script>
 // ══════════ 狀態（自動存到localStorage）══════════
 const DEF = {
- taiex:45900, today:new Date().toISOString().slice(0,10),
+ taiex:45900, prevClose:43634, today:new Date().toISOString().slice(0,10),
  holdings:[
   {name:"元大台灣50正2",code:"00631L",shares:131920,cost:27.36,price:37.5,cat:"槓桿",div:0},
   {name:"富邦臺灣加權正2",code:"00675L",shares:1200,cost:181.58,price:326.48,cat:"槓桿",div:0},
@@ -314,7 +314,11 @@ function renderAll(){
    <div class="small">上次抓取：${S.lastFetchD||"尚未"}｜均線更新：${S.lastMAD||"尚未"}｜開啟頁面自動更新（證交所盤後資料14:30後為當日）</div>
    <div class="g2" style="margin-top:10px">
     <label>台股加權指數${inp("taiex",S.taiex)}</label>
+    <label>昨日收盤（判定恐慌日用）${inp("prevClose",S.prevClose)}</label>
+   </div>
+   <div class="g2" style="margin-top:8px">
     <label>今日日期<input type="date" value="${S.today}" onchange="setDate(this.value)"></label>
+    <div><label>今日漲跌</label><div id="chgBox" style="font-size:18px;font-weight:700;padding-top:6px" class="mono"></div></div>
    </div>`),
   sec("s1b","①b ☁️ 多裝置同步與備份",false,`
    <div class="g2">
@@ -434,7 +438,12 @@ function renderOut(){
   <span>槓桿 <b style="color:#fbbf24">${c.ratio.toFixed(2)}x</b></span>
   <span>淨資產 <b style="color:#34d399">${wan(c.netWorth)}</b></span>
   <span>月繳 <b style="color:#f87171">${fmt(c.monthly)}</b></span>
-  <span>持股損益 <b style="color:${c.pnl>=0?'#34d399':'#f87171'}">${c.pnl>=0?"+":""}${wan(c.pnl)}</b></span>`;
+  <span>持股損益 <b style="color:${c.pnl>=0?'#34d399':'#f87171'}">${c.pnl>=0?"+":""}${wan(c.pnl)}</b></span>
+  ${(function(){const g=S.prevClose>0?(S.taiex-S.prevClose)/S.prevClose:0;return g<=-0.03?'<span class="badge" style="background:#b91c1c">恐慌日 停止決策</span>':"";})()}`;
+ (function(){const el=document.getElementById("chgBox");if(!el)return;
+  const g=S.prevClose>0?(S.taiex-S.prevClose)/S.prevClose:0;
+  el.textContent=(g>=0?"+":"")+fmt(S.taiex-S.prevClose)+"點（"+pc(g)+"）";
+  el.style.color=g<=-0.03?"#b91c1c":g<0?"#92400e":"#047857";})();
  // 健檢
  const flags=[];
  S.holdings.forEach(h=>{const v=h.shares*h.price,w=v/c.V,ret=h.price/h.cost-1;
@@ -449,6 +458,9 @@ function renderOut(){
  if(S.taiex<S.ma60&&S.taiex>=S.ma240)flags.push(["bad",`🔥 台股跌破季線60MA（${fmt(S.ma60)}）— 第二批加碼執行區！立即對照⑬觸發價`]);
  if(S.taiex<S.ma240)flags.push(["bad","台股跌破年線240MA — 停止一切加碼"]);
  if(S.light==="紅燈")flags.push(["warn","景氣紅燈 — 歷史過熱區，配合修剪不追高"]);
+ const chgP=S.prevClose>0?(S.taiex-S.prevClose)/S.prevClose:0;
+ if(chgP<=-0.03)flags.push(["bad",`今日大跌 ${pc(chgP)} — <b>恐慌日</b>：鐵律第六條「-3%以上不做任何決策」，今天只看不動，明天冷靜後再照表執行`]);
+ else if(chgP>=0.03)flags.push(["warn",`今日大漲 ${pc(chgP)} — 情緒亢奮日，同樣不適合臨時追價`]);
  let tsmcE=0;S.holdings.forEach(h=>{const w=TSMCW[h.code];if(w)tsmcE+=h.shares*h.price*w;});
  const tsmcLine=`<div class="msg" style="background:#eff6ff;color:#1e3a8a;font-weight:400;font-size:12px">🔬 台積電穿透曝險 ${wan(tsmcE)}（佔總曝險 ${pc(tsmcE/c.E)}）${tsmcE/c.E>0.5?" — <b>超過50%，你本質上是台積電的槓桿股東</b>":""}</div>`;
  document.getElementById("healthBox").innerHTML=(flags.length===0?`<div class="msg ok">✅ 全部通過，組合健康</div>`:flags.map(f=>`<div class="msg ${f[0]}">${f[0]==="bad"?"🚨":"⚠️"} ${f[1]}</div>`).join(""))+tsmcLine;
@@ -605,9 +617,10 @@ function renderOut(){
   `<div class="bar" style="margin-top:8px"><div style="width:${Math.min(c.A/60000000,1)*100}%"></div></div>
   <div class="small">投資資產 ${wan(c.A)} ／ 6,000萬（${pc(c.A/60000000)}）</div>`;
  // 剎車
- const allC=S.checks.every(Boolean);
+ const panicDay=S.prevClose>0&&(S.taiex-S.prevClose)/S.prevClose<=-0.03;
+ const allC=S.checks.every(Boolean)&&!panicDay;
  document.getElementById("chkBox").innerHTML=CHECKS.map((ck,i)=>`<label class="chk"><input type="checkbox" ${S.checks[i]?"checked":""} onchange="setChk(${i},this.checked)"><span>${ck}</span></label>`).join("")+
-  `<div class="msg ${allC?"ok":"bad"}" style="text-align:center;margin-top:10px">${allC?"✅ 通過紀律檢查 — 可以執行":"⛔ 尚有 "+S.checks.filter(x=>!x).length+" 項未通過 — 停手"}</div>
+  `<div class="msg ${allC?"ok":"bad"}" style="text-align:center;margin-top:10px">${allC?"✅ 通過紀律檢查 — 可以執行":(panicDay?"⛔ 今日為恐慌日（跌幅≥3%）— 系統鎖定，任何交易一律延到明天":"⛔ 尚有 "+S.checks.filter(x=>!x).length+" 項未通過 — 停手")}</div>
   <button class="btn2" style="margin-top:6px" onclick="S.checks=[false,false,false,false,false,false];save();renderAll()">重置清單</button>`;
  // 持倉
  document.getElementById("holdBox").innerHTML=`<table style="min-width:520px"><tr><th>標的</th><th>股數</th><th>均攤</th><th>現價</th><th>市值</th><th>損益</th></tr>`+
