@@ -132,7 +132,7 @@ function compute(){
 }
 
 // ══════════ 自動抓取 ══════════
-const VER="v5.5";
+const VER="v5.6";
 async function tryFetch(u,mode){
  const r=await fetch(u,{cache:"no-store"});
  if(!r.ok)throw new Error("HTTP "+r.status);
@@ -150,6 +150,38 @@ const PROXIES=[
  {n:"corsproxy",  f:u=>"https://corsproxy.io/?url="+encodeURIComponent(bust(u)),           m:"json"},
  {n:"thingproxy", f:u=>"https://thingproxy.freeboard.io/fetch/"+u,                         m:"json"}
 ];
+
+// ── JSONP：用 script 標籤載入，完全繞過 fetch/CORS ──
+function jsonp(url,ms){return new Promise((res,rej)=>{
+ const cb="__jp"+Math.random().toString(36).slice(2);
+ const s=document.createElement("script");
+ const t=setTimeout(()=>{cleanup();rej(new Error("timeout"));},ms||15000);
+ function cleanup(){clearTimeout(t);try{delete window[cb];}catch(e){}if(s.parentNode)s.parentNode.removeChild(s);}
+ window[cb]=d=>{cleanup();res(d);};
+ s.onerror=()=>{cleanup();rej(new Error("script blocked"));};
+ s.src=url+(url.includes("?")?"&":"?")+"response=jsonp&callback="+cb;
+ document.head.appendChild(s);
+});}
+function ymd(d){return d.getFullYear()+String(d.getMonth()+1).padStart(2,"0")+String(d.getDate()).padStart(2,"0");}
+// 以 JSONP 取當日全市場收盤價
+async function jsonpPrices(dstr){
+ const j=await jsonp("https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date="+dstr+"&type=ALL");
+ if(!j||j.stat!=="OK")throw new Error(j&&j.stat?j.stat:"no data");
+ const map={};let tb=null;
+ (j.tables||[]).forEach(T=>{const f=(T.fields||[]).join();if(f.includes("證券代號")&&f.includes("收盤價"))tb=T;});
+ if(!tb)throw new Error("找不到收盤表");
+ const ci=tb.fields.indexOf("證券代號"),pi=tb.fields.indexOf("收盤價");
+ tb.data.forEach(r=>{const p=parseFloat(String(r[pi]).replace(/,/g,""));if(p>0)map[String(r[ci]).trim()]=p;});
+ return map;
+}
+// 以 JSONP 取大盤日K（指定月份）
+async function jsonpTaiex(dstr){
+ const j=await jsonp("https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST?date="+dstr.slice(0,6)+"01");
+ if(!j||!j.data)throw new Error("no index data");
+ const f=x=>parseFloat(String(x).replace(/,/g,""));
+ return j.data.map(r=>{const p=String(r[0]).split("/");
+  return {t:new Date(+p[0]+1911,+p[1]-1,+p[2]),o:f(r[1]),h:f(r[2]),l:f(r[3]),c:f(r[4])};}).filter(x=>x.c>0);
+}
 let _chan=0;
 async function getJSON(u,log){
  let err;
@@ -168,6 +200,13 @@ window.diagnose=async()=>{
  el.innerHTML="🔍 逐條測試中，請稍候約30秒…";el.className="msg warn";
  const U="https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK";
  const out=[];
+ try{const t0=Date.now();const m=await jsonpPrices(ymd(new Date()));
+  out.push(`<div style="color:#047857">✅ <b>JSONP（繞過CORS）</b> 成功（${Date.now()-t0}ms，${Object.keys(m).length}檔）← 主要路線</div>`);
+ }catch(e){
+  try{const d=new Date();d.setDate(d.getDate()-1);const t0=Date.now();const m=await jsonpPrices(ymd(d));
+   out.push(`<div style="color:#047857">✅ <b>JSONP（前一交易日）</b> 成功（${Date.now()-t0}ms，${Object.keys(m).length}檔）</div>`);
+  }catch(e2){out.push(`<div style="color:#b91c1c">❌ JSONP：${(e2.message||"失敗").slice(0,40)}</div>`);}
+ }
  for(const p of PROXIES){
   const t0=Date.now();
   try{
@@ -180,34 +219,47 @@ window.diagnose=async()=>{
  }
  const ok=out.filter(x=>x.includes("✅")).length;
  el.innerHTML=`<b>診斷結果（${VER}）：${ok}/${PROXIES.length} 條通道可用</b>`+out.join("")+
-  (ok?`<div style="margin-top:6px;color:#047857">有可用通道 → 請直接按上方⚡抓取</div>`
+  (out[0].includes("✅")||ok?`<div style="margin-top:6px;color:#047857">有可用通道 → 請直接按上方⚡抓取</div>`
      :`<div style="margin-top:6px">全部不通。請把這份結果截圖回報，並確認：<br>①網址列是否為 https:// 開頭的 github.io<br>②是否已清除快取重新整理（版本應顯示 ${VER}）</div>`);
  el.className=ok?"msg ok":"msg bad";
 };
 async function autoFetch(){
- const el=document.getElementById("fmsg");el.textContent="抓取中…（直連→代理1→代理2 三通道嘗試，最久約20秒）";el.className="msg warn";
- const log=[];
+ const el=document.getElementById("fmsg");el.textContent="抓取中…（JSONP優先，失敗才轉代理，最久約30秒）";el.className="msg warn";
+ const log=[];let n=0,idxOK=false,via="";
+ // ① JSONP 路線（繞過CORS）
  try{
-  const st=await getJSON("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",log);
-  const ix=await getJSON("https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK",log);
-  const map={};st.forEach(s=>{const p=parseFloat(s.ClosingPrice);if(p>0)map[s.Code]=p;});
-  let n=0;S.holdings.forEach(h=>{if(map[h.code]){h.price=map[h.code];n++;}});
-  const last=ix[ix.length-1];
-  if(last&&last.TAIEX)S.taiex=parseFloat(String(last.TAIEX).replace(/,/g,""));
-  S.today=new Date().toISOString().slice(0,10);
-  S.lastFetchD=S.today;
-  let vixOk=false;
-  try{const vx=await getJSON("https://cdn.cboe.com/api/global/delayed_quotes/quotes/_VIX.json",log);
-   if(vx&&vx.data&&vx.data.last>0){S.vix=+(+vx.data.last).toFixed(1);vixOk=true;}}catch(e){}
-  try{const bw=await getJSON("https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL",log);
-   const ym={};bw.forEach(x=>{const y=parseFloat(x.DividendYield);if(y>0)ym[x.Code]=y;});
-   S.holdings.forEach(h=>{if(h.cat==="個股"&&ym[h.code])h.div=+(h.price*ym[h.code]/100).toFixed(2);});
-  }catch(e){}
-  save();renderAll();
-  document.getElementById("fmsg").textContent=`✅ 已更新 ${n} 檔收盤價＋大盤 ${fmt(S.taiex)}${vixOk?"＋VIX "+S.vix:""}（證交所盤後，通道：${log.length<=2?"直連":"代理"}）。${vixOk?"":"VIX請手動、"}個股配息已依殖利率自動估算（ETF配息請手動維護）。景氣燈號每月手動（④）。`;
-  document.getElementById("fmsg").className="msg ok";
- }catch(e){
-  el.innerHTML="❌ 六通道皆失敗（"+(e.message||e)+"）。過程："+log.join(" → ")+"。<br><b>排除順序：</b>①換行動網路（4G/5G）試一次 ②15分鐘後再試（代理常限流）③仍失敗則手動輸入指數即可，其餘功能不受影響。";
+  let d=new Date(),map=null,tried=0;
+  while(tried<5&&!map){
+   try{map=await jsonpPrices(ymd(d));}catch(e){d.setDate(d.getDate()-1);tried++;}
+  }
+  if(map){
+   S.holdings.forEach(h=>{if(map[h.code]){h.price=map[h.code];n++;}});
+   const rows=await jsonpTaiex(ymd(d));
+   if(rows.length){const last=rows[rows.length-1];S.taiex=+last.c.toFixed(2);
+    if(rows.length>1)S.prevClose=+rows[rows.length-2].c.toFixed(2);
+    S.today=d.toISOString().slice(0,10);idxOK=true;}
+   via="JSONP";log.push("JSONP✓");
+  }
+ }catch(e){log.push("JSONP✗("+(e.message||"fail").slice(0,20)+")");}
+ // ② 代理路線（JSONP失敗時）
+ if(!n){
+  try{
+   const st=await getJSON("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",log);
+   const map={};st.forEach(s=>{const p=parseFloat(s.ClosingPrice);if(p>0)map[s.Code]=p;});
+   S.holdings.forEach(h=>{if(map[h.code]){h.price=map[h.code];n++;}});
+   const ix=await getJSON("https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK",log);
+   const last=ix[ix.length-1];
+   if(last&&last.TAIEX){S.taiex=parseFloat(String(last.TAIEX).replace(/,/g,""));idxOK=true;}
+   S.today=new Date().toISOString().slice(0,10);via="代理";
+  }catch(e){log.push("代理全失敗");}
+ }
+ if(n){
+  S.lastFetch=S.today;save();renderAll();
+  const e2=document.getElementById("fmsg");
+  e2.textContent=`✅ 已更新 ${n} 檔收盤價${idxOK?"＋大盤 "+fmt(S.taiex):""}（來源：${via}）。VIX與景氣燈號請手動（④）。`;
+  e2.className="msg ok";
+ }else{
+  el.innerHTML="❌ 全部失敗。過程："+log.join(" → ")+"。<br>請按🔍連線診斷取得細節；若JSONP也被擋，代表裝置層級封鎖，請直接手動輸入指數即可（其餘功能不受影響）。";
   el.className="msg bad";
  }
 }
