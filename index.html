@@ -2,6 +2,8 @@
 <html lang="zh-TW">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>投資駕駛艙 v5</title>
 <style>
@@ -130,27 +132,58 @@ function compute(){
 }
 
 // ══════════ 自動抓取 ══════════
-async function tryFetch(u,wrap){const r=await fetch(u,{cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);const j=await r.json();return wrap?JSON.parse(j.contents):j;}
+const VER="v5.5";
+async function tryFetch(u,mode){
+ const r=await fetch(u,{cache:"no-store"});
+ if(!r.ok)throw new Error("HTTP "+r.status);
+ if(mode==="text"){const s=await r.text();return JSON.parse(s);}
+ const j=await r.json();
+ return mode==="wrap"?JSON.parse(j.contents):j;
+}
 function bust(u){return u+(u.includes("?")?"&":"?")+"_cb="+Date.now();}
 const PROXIES=[
- {n:"直連",      f:u=>u,                                                              w:false},
- {n:"allorigins",f:u=>"https://api.allorigins.win/raw?url="+encodeURIComponent(bust(u)),w:false},
- {n:"codetabs",  f:u=>"https://api.codetabs.com/v1/proxy?quest="+encodeURIComponent(bust(u)),w:false},
- {n:"allorigins2",f:u=>"https://api.allorigins.win/get?url="+encodeURIComponent(bust(u)),w:true},
- {n:"thingproxy",f:u=>"https://thingproxy.freeboard.io/fetch/"+bust(u),               w:false},
- {n:"corsproxy", f:u=>"https://corsproxy.io/?url="+encodeURIComponent(bust(u)),        w:false}
+ {n:"直連",       f:u=>u,                                                                m:"json"},
+ {n:"jina",       f:u=>"https://r.jina.ai/"+u,                                           m:"text"},
+ {n:"allorigins", f:u=>"https://api.allorigins.win/raw?url="+encodeURIComponent(bust(u)), m:"json"},
+ {n:"codetabs",   f:u=>"https://api.codetabs.com/v1/proxy?quest="+encodeURIComponent(bust(u)), m:"json"},
+ {n:"allorigins2",f:u=>"https://api.allorigins.win/get?url="+encodeURIComponent(bust(u)),  m:"wrap"},
+ {n:"corsproxy",  f:u=>"https://corsproxy.io/?url="+encodeURIComponent(bust(u)),           m:"json"},
+ {n:"thingproxy", f:u=>"https://thingproxy.freeboard.io/fetch/"+u,                         m:"json"}
 ];
 let _chan=0;
 async function getJSON(u,log){
  let err;
  for(let i=0;i<PROXIES.length;i++){
-  const p=PROXIES[(_chan+i)%PROXIES.length];
-  try{const r=await tryFetch(p.f(u),p.w);_chan=(_chan+i)%PROXIES.length;if(log)log.push(p.n+"✓");return r;}
-  catch(e){err=e;if(log)log.push(p.n+"✗");}
+  const k=(_chan+i)%PROXIES.length,p=PROXIES[k];
+  try{const r=await tryFetch(p.f(u),p.m);_chan=k;if(log)log.push(p.n+"✓");return r;}
+  catch(e){err=e;if(log)log.push(p.n+"✗("+(e.message||"fail").slice(0,22)+")");}
  }
  throw err||new Error("全部通道失敗");
 }
 const getJSONfast=u=>getJSON(u,null);
+
+// ── 連線診斷：逐條通道測試並回報 ──
+window.diagnose=async()=>{
+ const el=document.getElementById("fmsg");
+ el.innerHTML="🔍 逐條測試中，請稍候約30秒…";el.className="msg warn";
+ const U="https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK";
+ const out=[];
+ for(const p of PROXIES){
+  const t0=Date.now();
+  try{
+   const r=await tryFetch(p.f(U),p.m);
+   const n=Array.isArray(r)?r.length:0;
+   out.push(`<div style="color:#047857">✅ <b>${p.n}</b> 成功（${Date.now()-t0}ms，${n}筆）</div>`);
+  }catch(e){
+   out.push(`<div style="color:#b91c1c">❌ ${p.n}：${(e.message||"失敗").slice(0,60)}</div>`);
+  }
+ }
+ const ok=out.filter(x=>x.includes("✅")).length;
+ el.innerHTML=`<b>診斷結果（${VER}）：${ok}/${PROXIES.length} 條通道可用</b>`+out.join("")+
+  (ok?`<div style="margin-top:6px;color:#047857">有可用通道 → 請直接按上方⚡抓取</div>`
+     :`<div style="margin-top:6px">全部不通。請把這份結果截圖回報，並確認：<br>①網址列是否為 https:// 開頭的 github.io<br>②是否已清除快取重新整理（版本應顯示 ${VER}）</div>`);
+ el.className=ok?"msg ok":"msg bad";
+};
 async function autoFetch(){
  const el=document.getElementById("fmsg");el.textContent="抓取中…（直連→代理1→代理2 三通道嘗試，最久約20秒）";el.className="msg warn";
  const log=[];
@@ -317,6 +350,8 @@ function renderAll(){
  app.innerHTML=[
   sec("s1","① 今日市況（一鍵自動抓取）",true,`
    <button class="btn" onclick="autoFetch()">⚡ 一鍵抓取今日收盤價＋大盤指數</button>
+   <button class="btn2" style="width:100%;margin-top:6px" onclick="diagnose()">🔍 連線診斷（抓不到時按這個）</button>
+   <div class="small" style="text-align:right">程式版本 ${VER}</div>
    <div id="fmsg" class="small"></div>
    <div class="small">上次抓取：${S.lastFetchD||"尚未"}｜均線更新：${S.lastMAD||"尚未"}｜開啟頁面自動更新（證交所盤後資料14:30後為當日）</div>
    <div class="g2" style="margin-top:10px">
