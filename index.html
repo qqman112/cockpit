@@ -55,7 +55,7 @@ td input{padding:3px 5px;font-size:12px}
 <script>
 // ══════════ 狀態（自動存到localStorage）══════════
 const DEF = {
- taiex:45900, prevClose:43634, today:new Date().toISOString().slice(0,10),
+ taiex:45900, prevClose:43634, peak:48219, today:new Date().toISOString().slice(0,10),
  holdings:[
   {name:"元大台灣50正2",code:"00631L",shares:131920,cost:27.36,price:37.5,cat:"槓桿",div:0},
   {name:"富邦臺灣加權正2",code:"00675L",shares:1200,cost:181.58,price:326.48,cat:"槓桿",div:0},
@@ -130,20 +130,27 @@ function compute(){
 }
 
 // ══════════ 自動抓取 ══════════
-async function tryFetch(u){const r=await fetch(u,{cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);return r.json();}
+async function tryFetch(u,wrap){const r=await fetch(u,{cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);const j=await r.json();return wrap?JSON.parse(j.contents):j;}
 function bust(u){return u+(u.includes("?")?"&":"?")+"_cb="+Date.now();}
-async function getJSON(u,log){
- try{log.push("直連");return await tryFetch(bust(u));}
- catch(e1){log.push("直連失敗("+(e1.message||"blocked")+")→代理1");
-  try{return await tryFetch("https://api.allorigins.win/raw?url="+encodeURIComponent(bust(u)));}
-  catch(e2){log.push("代理1失敗→代理2");
-   return await tryFetch("https://corsproxy.io/?url="+encodeURIComponent(bust(u)));}}}
+const PROXIES=[
+ {n:"直連",      f:u=>u,                                                              w:false},
+ {n:"allorigins",f:u=>"https://api.allorigins.win/raw?url="+encodeURIComponent(bust(u)),w:false},
+ {n:"codetabs",  f:u=>"https://api.codetabs.com/v1/proxy?quest="+encodeURIComponent(bust(u)),w:false},
+ {n:"allorigins2",f:u=>"https://api.allorigins.win/get?url="+encodeURIComponent(bust(u)),w:true},
+ {n:"thingproxy",f:u=>"https://thingproxy.freeboard.io/fetch/"+bust(u),               w:false},
+ {n:"corsproxy", f:u=>"https://corsproxy.io/?url="+encodeURIComponent(bust(u)),        w:false}
+];
 let _chan=0;
-async function getJSONfast(u){
- const chans=[x=>bust(x),x=>"https://api.allorigins.win/raw?url="+encodeURIComponent(bust(x)),x=>"https://corsproxy.io/?url="+encodeURIComponent(bust(x))];
- for(let c=_chan;c<3;c++){try{const r=await tryFetch(chans[c](u));_chan=c;return r;}catch(e){}}
- throw new Error("三通道皆失敗");
+async function getJSON(u,log){
+ let err;
+ for(let i=0;i<PROXIES.length;i++){
+  const p=PROXIES[(_chan+i)%PROXIES.length];
+  try{const r=await tryFetch(p.f(u),p.w);_chan=(_chan+i)%PROXIES.length;if(log)log.push(p.n+"✓");return r;}
+  catch(e){err=e;if(log)log.push(p.n+"✗");}
+ }
+ throw err||new Error("全部通道失敗");
 }
+const getJSONfast=u=>getJSON(u,null);
 async function autoFetch(){
  const el=document.getElementById("fmsg");el.textContent="抓取中…（直連→代理1→代理2 三通道嘗試，最久約20秒）";el.className="msg warn";
  const log=[];
@@ -167,7 +174,7 @@ async function autoFetch(){
   document.getElementById("fmsg").textContent=`✅ 已更新 ${n} 檔收盤價＋大盤 ${fmt(S.taiex)}${vixOk?"＋VIX "+S.vix:""}（證交所盤後，通道：${log.length<=2?"直連":"代理"}）。${vixOk?"":"VIX請手動、"}個股配息已依殖利率自動估算（ETF配息請手動維護）。景氣燈號每月手動（④）。`;
   document.getElementById("fmsg").className="msg ok";
  }catch(e){
-  el.innerHTML="❌ 三通道皆失敗（"+(e.message||e)+"）。過程："+log.join(" → ")+"。<br><b>最常見原因：公司網路防火牆封鎖外部API</b>——請改用手機4G/5G或家用WiFi開啟同一網址測試。";
+  el.innerHTML="❌ 六通道皆失敗（"+(e.message||e)+"）。過程："+log.join(" → ")+"。<br><b>排除順序：</b>①換行動網路（4G/5G）試一次 ②15分鐘後再試（代理常限流）③仍失敗則手動輸入指數即可，其餘功能不受影響。";
   el.className="msg bad";
  }
 }
@@ -319,6 +326,10 @@ function renderAll(){
    <div class="g2" style="margin-top:8px">
     <label>今日日期<input type="date" value="${S.today}" onchange="setDate(this.value)"></label>
     <div><label>今日漲跌</label><div id="chgBox" style="font-size:18px;font-weight:700;padding-top:6px" class="mono"></div></div>
+   </div>
+   <div class="g2" style="margin-top:8px">
+    <label>歷史高點（滾動更新）${inp("peak",S.peak)}</label>
+    <div><label>距高點回檔</label><div id="ddBox" style="font-size:18px;font-weight:700;padding-top:6px" class="mono"></div></div>
    </div>`),
   sec("s1b","①b ☁️ 多裝置同步與備份",false,`
    <div class="g2">
@@ -443,7 +454,12 @@ function renderOut(){
  (function(){const el=document.getElementById("chgBox");if(!el)return;
   const g=S.prevClose>0?(S.taiex-S.prevClose)/S.prevClose:0;
   el.textContent=(g>=0?"+":"")+fmt(S.taiex-S.prevClose)+"點（"+pc(g)+"）";
-  el.style.color=g<=-0.03?"#b91c1c":g<0?"#92400e":"#047857";})();
+  el.style.color=g<=-0.03?"#b91c1c":g<0?"#92400e":"#047857";
+  const el2=document.getElementById("ddBox");
+  if(el2&&S.peak>0){const dd=S.taiex/S.peak-1;
+   el2.textContent=pc(dd)+(dd>=0?"（改寫新高）":"");
+   el2.style.color=dd>=-0.02?"#b91c1c":dd>=-0.10?"#92400e":"#047857";}
+  if(S.taiex>S.peak){S.peak=Math.round(S.taiex);}})();
  // 健檢
  const flags=[];
  S.holdings.forEach(h=>{const v=h.shares*h.price,w=v/c.V,ret=h.price/h.cost-1;
@@ -611,7 +627,11 @@ function renderOut(){
   <div class="small">觸發指數可直接修改；建議滾動對齊均線：季線${fmt(S.ma60)}／半年線${fmt(S.ma120)}／年線${fmt(S.ma240)}。執行後打勾留紀錄。</div>
   <div class="msg warn" style="font-size:12px">下次季末再平衡：${(function(){const q=["2026-09-30","2026-12-31","2027-03-31","2027-06-30"].find(x=>new Date(x)>=tN);return q?q+"（"+Math.ceil((new Date(q)-tN)/86400000)+"天後）":"—";})()}</div>`;
  // 減碼+Glide
- document.getElementById("trimBox").innerHTML=TRIMS.map(t=>`<div class="row" style="${S.taiex>=t[0]?"color:#b91c1c;font-weight:600":""}"><span class="mono">${fmt(t[0])}</span><span style="text-align:right;flex:1;margin-left:14px">${S.taiex>=t[0]?"🔔 已到達 — ":""}${t[1]}</span></div>`).join("")+
+ document.getElementById("trimBox").innerHTML=TRIMS.map(t=>{
+   const gap=t[0]/S.taiex-1, hit=S.taiex>=t[0];
+   const near=!hit&&gap<=0.05;
+   return `<div class="row" style="${hit?"color:#b91c1c;font-weight:600":(near?"color:#92400e;font-weight:600":"")}"><span class="mono">${fmt(t[0])}<div class="small">${hit?"🔔 已到達":(near?"⚠️ 僅差 "+pc(gap):"距離 "+pc(gap))}</div></span><span style="text-align:right;flex:1;margin-left:14px">${t[1]}</span></div>`;}).join("")+
+  `<div class="small" style="margin-top:6px">到達修剪關卡時：開③引擎讀「1X調整」金額與張數 → 賣正2換0050 → 曝險比回到目標。不必等季末。</div>`+
   `<div style="margin-top:12px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#78716c">GLIDE PATH（降槓桿里程碑）</div>`+
   GLIDE.map(g=>`<div class="row" style="${c.A>=g[0]?"color:#b91c1c;font-weight:600":""}"><span>${c.A>=g[0]?"✅":"○"} ${g[2]}</span><span>正2上限 <b>${g[1]}%</b></span></div>`).join("")+
   `<div class="bar" style="margin-top:8px"><div style="width:${Math.min(c.A/60000000,1)*100}%"></div></div>
