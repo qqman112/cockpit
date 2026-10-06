@@ -132,23 +132,33 @@ function compute(){
 }
 
 // ══════════ 自動抓取 ══════════
-const VER="v5.6";
+const VER="v5.7";
+function extractJSON(s){
+ if(typeof s!=="string")return s;
+ const i=s.search(/[\[{]/);
+ if(i<0)throw new Error("回應無JSON("+s.slice(0,30)+")");
+ const sub=s.slice(i);
+ try{return JSON.parse(sub);}catch(e){}
+ const end=Math.max(sub.lastIndexOf("]"),sub.lastIndexOf("}"));
+ if(end>0){try{return JSON.parse(sub.slice(0,end+1));}catch(e){}}
+ throw new Error("JSON解析失敗(可能被截斷)");
+}
 async function tryFetch(u,mode){
  const r=await fetch(u,{cache:"no-store"});
  if(!r.ok)throw new Error("HTTP "+r.status);
- if(mode==="text"){const s=await r.text();return JSON.parse(s);}
+ if(mode==="text")return extractJSON(await r.text());
  const j=await r.json();
- return mode==="wrap"?JSON.parse(j.contents):j;
+ return mode==="wrap"?extractJSON(j.contents):j;
 }
 function bust(u){return u+(u.includes("?")?"&":"?")+"_cb="+Date.now();}
 const PROXIES=[
- {n:"直連",       f:u=>u,                                                                m:"json"},
  {n:"jina",       f:u=>"https://r.jina.ai/"+u,                                           m:"text"},
+ {n:"jina-bust",  f:u=>"https://r.jina.ai/"+bust(u),                                      m:"text"},
+ {n:"直連",       f:u=>u,                                                                m:"json"},
  {n:"allorigins", f:u=>"https://api.allorigins.win/raw?url="+encodeURIComponent(bust(u)), m:"json"},
  {n:"codetabs",   f:u=>"https://api.codetabs.com/v1/proxy?quest="+encodeURIComponent(bust(u)), m:"json"},
  {n:"allorigins2",f:u=>"https://api.allorigins.win/get?url="+encodeURIComponent(bust(u)),  m:"wrap"},
- {n:"corsproxy",  f:u=>"https://corsproxy.io/?url="+encodeURIComponent(bust(u)),           m:"json"},
- {n:"thingproxy", f:u=>"https://thingproxy.freeboard.io/fetch/"+u,                         m:"json"}
+ {n:"corsproxy",  f:u=>"https://corsproxy.io/?url="+encodeURIComponent(bust(u)),           m:"json"}
 ];
 
 // ── JSONP：用 script 標籤載入，完全繞過 fetch/CORS ──
@@ -214,7 +224,7 @@ window.diagnose=async()=>{
    const n=Array.isArray(r)?r.length:0;
    out.push(`<div style="color:#047857">✅ <b>${p.n}</b> 成功（${Date.now()-t0}ms，${n}筆）</div>`);
   }catch(e){
-   out.push(`<div style="color:#b91c1c">❌ ${p.n}：${(e.message||"失敗").slice(0,60)}</div>`);
+   out.push(`<div style="color:#b91c1c">❌ ${p.n}：${(e.message||"失敗").slice(0,70)}</div>`);
   }
  }
  const ok=out.filter(x=>x.includes("✅")).length;
