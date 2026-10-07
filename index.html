@@ -83,6 +83,8 @@ const DEF = {
  pledgeCol:0,pledgeLoan:0,pledgeRate:3.0,
  houseValue:18000000,houseInDenom:false,houseExposure:false,
  dcaMonthly:10000,
+ pool:0, trades:[], sellCode:"00981A", sellShares:39000, sellPrice:32.72, feeDisc:1,
+ alloc:[{code:"0050",pct:50,price:0},{code:"00631L",pct:50,price:0},{code:"00685L",pct:0,price:0}],
  simLoanWan:490,simRateBp:350,simY:10,simM:0,simPledge:false,simLivingWan:3,incomeM:96667,
  stress:-35, wTarget:60000000,wRate:4,wGrowth:10,
  ma5:45500,ma20:44200,ma60:42500,ma120:40500,ma240:37500,rsiW:65,kdW:75,
@@ -106,6 +108,8 @@ const CAT_C={"槓桿":"#c2452d","原型":"#1d5fa0","主動":"#6b4fa0","高息":"
 const TSMCW={"2330":1,"0050":0.58,"00981A":0.35,"00631L":0.80,"00675L":0.60,"00685L":0.60};
 const FEE_DEF={"00631L":0.56,"00675L":0.32,"00685L":0.16,"0050":0.10,"00981A":1.00,"00713":0.30,"00929":0.30};
 if(!Array.isArray(S.snaps))S.snaps=[];
+if(!Array.isArray(S.trades))S.trades=[];
+if(!Array.isArray(S.alloc)||!S.alloc.length)S.alloc=[{code:"0050",pct:50,price:0},{code:"00631L",pct:50,price:0},{code:"00685L",pct:0,price:0}];
 if(!Array.isArray(S.batches))S.batches=BATCHES.map(b=>Object.assign({},b,{done:false}));
 S.holdings.forEach(h=>{if(h.fee===undefined)h.fee=FEE_DEF[h.code]||0;});
 
@@ -122,17 +126,17 @@ function compute(){
  S.holdings.forEach(h=>{const v=h.shares*h.price;V+=v;cost+=h.shares*h.cost;if(h.cat==="槓桿")L+=v;byCat[h.cat]=(byCat[h.cat]||0)+v;});
  const mort=S.loans[0].p+S.loans[1].p, credit=S.loans[2].p+S.pledgeLoan;
  const hEq=Math.max(0,S.houseValue-mort);
- let E=2*L+(V-L),A=V+S.investCash;
+ let E=2*L+(V-L),A=V+S.investCash+(S.pool||0);
  if(S.houseInDenom)A+=hEq; if(S.houseExposure)E+=hEq;
  const monthly=S.loans.reduce((s,l)=>s+pmt(l.p,l.rate,l.y,l.m),0)+S.pledgeLoan*S.pledgeRate/100/12;
  const pie=Object.entries(byCat).map(([k,v])=>({name:k,value:v}));
- pie.push({name:"現金",value:S.investCash}); if(S.houseInDenom)pie.push({name:"房產",value:hEq});
+ pie.push({name:"現金",value:S.investCash+(S.pool||0)}); if(S.houseInDenom)pie.push({name:"房產",value:hEq});
  return {V,L,E,A,ratio:A>0?E/A:0,pnl:V-cost,cost,levPct:V>0?L/V:0,hEq,mort,credit,monthly,pie,
-  netWorth:V+S.investCash+S.survivalFund+S.houseValue-mort-credit};
+  netWorth:V+S.investCash+(S.pool||0)+S.survivalFund+S.houseValue-mort-credit};
 }
 
 // ══════════ 自動抓取 ══════════
-const VER="v5.7";
+const VER="v5.8";
 function extractJSON(s){
  if(typeof s!=="string")return s;
  const i=s.search(/[\[{]/);
@@ -403,6 +407,89 @@ window.setBatch=(i,f,v)=>{S.batches[i][f]=parseFloat(v)||0;save();renderOut();};
 window.setBatchDone=(i,v)=>{S.batches[i].done=v;save();renderOut();};
 window.takeSnap=()=>{const c=compute();if(S.snaps.length&&S.snaps[S.snaps.length-1].d===S.today){if(!confirm("今天已有快照，要再記一筆？"))return;}S.snaps.push({d:S.today,v:Math.round(c.V),nw:Math.round(c.netWorth),r:+(c.ratio*100).toFixed(1)});save();renderOut();};
 window.delSnap=i=>{S.snaps.splice(i,1);save();renderOut();};
+// ══════════ 資金調度器 ══════════
+const isETF=c=>/^00/.test(c);
+const feeR=()=>0.001425*(S.feeDisc>0?S.feeDisc:1);
+const betaOf=c=>{const h=S.holdings.find(x=>x.code===c);return h&&h.cat==="槓桿"?2:1;};
+const pxOf=a=>{if(a.price>0)return a.price;const h=S.holdings.find(x=>x.code===a.code);return h?h.price:0;};
+function sellCalc(){
+ const h=S.holdings.find(x=>x.code===S.sellCode);
+ const sh=S.sellShares||0,p=S.sellPrice||0,gross=sh*p;
+ const fee=gross>0?Math.max(20,Math.round(gross*feeR())):0;
+ const tax=Math.round(gross*(isETF(S.sellCode)?0.001:0.003));
+ const net=gross-fee-tax,costBasis=h?sh*h.cost:0;
+ return {h,sh,p,gross,fee,tax,net,real:net-costBasis,costBasis};
+}
+function allocCalc(){
+ const P=S.pool||0,fr=feeR();let rows=[],spend=0,fees=0,dE=0;
+ S.alloc.forEach((a,i)=>{
+  const price=pxOf(a),amt=P*(a.pct||0)/100;
+  let sh=price>0?Math.floor(amt/(price*(1+fr))):0;
+  const gross=sh*price,fee=sh>0?Math.max(20,Math.round(gross*fr)):0;
+  rows.push({i,code:a.code,pct:a.pct||0,price,amt,sh,gross,fee,cost:gross+fee,beta:betaOf(a.code)});
+  spend+=gross+fee;fees+=fee;dE+=gross*betaOf(a.code);
+ });
+ return {P,rows,spend,fees,dE,sumPct:S.alloc.reduce((s,a)=>s+(a.pct||0),0)};
+}
+function snapUndo(){S._undo=JSON.stringify({holdings:S.holdings,pool:S.pool,trades:S.trades});}
+window.undoTrade=()=>{
+ if(!S._undo){alert("沒有可復原的步驟");return;}
+ if(!confirm("復原上一步交易？（持倉、待分配資金、交易紀錄會回到上一步前）"))return;
+ const u=JSON.parse(S._undo);S.holdings=u.holdings;S.pool=u.pool;S.trades=u.trades;S._undo=null;save();renderAll();
+};
+window.doSell=()=>{
+ const s=sellCalc();
+ if(!s.h){alert("找不到此標的");return;}
+ if(s.sh<=0||s.p<=0){alert("請輸入股數與成交價");return;}
+ if(s.sh>s.h.shares){alert("賣出股數("+s.sh+")超過持有("+s.h.shares+")");return;}
+ if(!confirm(`確認記錄賣出 ${s.h.name}\n${fmt(s.sh)}股 × ${s.p}\n成交金額 ${fmt(s.gross)}\n手續費 ${fmt(s.fee)}＋證交稅 ${fmt(s.tax)}\n實收 ${fmt(s.net)}\n實現損益 ${s.real>=0?"+":""}${fmt(s.real)}`))return;
+ snapUndo();
+ s.h.shares-=s.sh;
+ S.pool=(S.pool||0)+s.net;
+ S.trades.push({d:S.today,t:"賣",code:s.h.code,name:s.h.name,sh:s.sh,p:s.p,amt:s.net,real:Math.round(s.real)});
+ save();renderAll();
+};
+window.setAlloc=(i,f,v)=>{S.alloc[i][f]=f==="code"?v:(parseFloat(v)||0);save();renderOut();};
+window.preset=k=>{
+ const set=(a,b,c)=>{S.alloc=[{code:"0050",pct:a,price:0},{code:"00631L",pct:b,price:0},{code:"00685L",pct:c,price:0}];};
+ if(k==="plan")set(100,0,0);
+ else if(k==="5050")set(50,50,0);
+ else if(k==="685")set(50,0,50);
+ else if(k==="neutral"){
+  const c=compute(),t=S.bandTarget/100,P=S.pool||0;
+  const xMax=t*c.A-c.E-P; // 可買的2X金額上限，使曝險比不超過目標
+  const p2=P>0?Math.max(0,Math.min(100,Math.floor(xMax/P*100))):0;
+  set(100-p2,p2,0);
+ }
+ save();renderAll();
+};
+window.doBuy=()=>{
+ const a=allocCalc(),c=compute();
+ if(a.P<=0){alert("待分配資金為0，請先在STEP 1記錄賣出（或手動輸入待分配金額）");return;}
+ if(Math.abs(a.sumPct-100)>0.5&&!confirm("分配比例合計 "+a.sumPct+"%（非100%），剩餘資金會留在待分配池。繼續？"))return;
+ const panic=S.prevClose>0&&(S.taiex-S.prevClose)/S.prevClose<=-0.03;
+ if(panic){alert("⛔ 今日為恐慌日（跌幅≥3%），依鐵律第六條暫停交易，明天再執行。");return;}
+ const r1=(c.E+a.dE)/(c.A-a.fees),hi=(S.bandTarget+S.tolerance)/100;
+ const lines=a.rows.filter(r=>r.sh>0).map(r=>`${r.code}：${fmt(r.sh)}股 × ${r.price} ≈ ${fmt(r.cost)}`).join("\n");
+ if(!lines){alert("沒有可買入的股數");return;}
+ let msg=`確認買入：\n${lines}\n合計 ${fmt(a.spend)}（含手續費 ${fmt(a.fees)}）\n\n曝險比 ${pc(c.ratio)} → ${pc(r1)}`;
+ if(r1>hi)msg+=`\n\n⚠ 買後超過上限 ${S.bandTarget+S.tolerance}%！\n這違反曝險紀律，確定要執行？`;
+ if(!confirm(msg))return;
+ if(r1>hi&&!confirm("再次確認：你了解這會讓曝險比超標，且未來需另外修剪正2？"))return;
+ snapUndo();
+ a.rows.forEach(r=>{
+  if(r.sh<=0)return;
+  let h=S.holdings.find(x=>x.code===r.code);
+  if(!h){h={name:r.code,code:r.code,shares:0,cost:0,price:r.price,cat:/L$/.test(r.code)?"槓桿":(isETF(r.code)?"原型":"個股"),div:0,fee:0};S.holdings.push(h);}
+  const nAvg=(h.shares*h.cost+r.cost)/(h.shares+r.sh);
+  h.shares+=r.sh;h.cost=+nAvg.toFixed(4);
+  S.pool-=r.cost;
+  S.trades.push({d:S.today,t:"買",code:r.code,name:h.name,sh:r.sh,p:r.price,amt:Math.round(r.cost)});
+ });
+ S.pool=Math.max(0,Math.round(S.pool));
+ save();renderAll();
+};
+window.delTrade=i=>{if(confirm("只刪除此筆紀錄（不會改動持倉）？")){S.trades.splice(i,1);save();renderOut();}};
 window.simSet=(k,v,lid,ltxt)=>{S[k]=v;if(lid){const e=document.getElementById(lid);if(e)e.textContent=ltxt;}save();renderOut();};
 
 window.resetAll=()=>{if(confirm("恢復為預設值？（會清除你儲存的所有修改）")){localStorage.removeItem("cockpit_v5");location.reload();}};
@@ -472,6 +559,29 @@ function renderAll(){
   sec("s6","⑥ 換倉匯率監控",false,`
    <div id="swapBox"></div>
    <div class="g2"><label>基準 981A/0050${inp("base981",S.base981,0.001)}</label><label>基準 631L/685L${inp("base631",S.base631,0.01)}</label></div>`),
+  sec("s6b","⑥b 💱 資金調度器（賣出 → 轉入）",true,`
+   <div style="font-weight:700;font-size:13px;color:#b45309">STEP 1｜記錄賣出</div>
+   <div class="g3" style="margin-top:6px">
+    <label>賣出標的<select onchange="S.sellCode=this.value;save();renderOut()">${S.holdings.map(h=>`<option value="${h.code}" ${S.sellCode===h.code?"selected":""}>${h.code} ${h.name}</option>`).join("")}</select></label>
+    <label>股數${inp("sellShares",S.sellShares)}</label>
+    <label>成交價${inp("sellPrice",S.sellPrice,0.01)}</label>
+   </div>
+   <label style="margin-top:6px">手續費折扣（1＝無折扣；2.8折填0.28）${inp("feeDisc",S.feeDisc,0.01)}</label>
+   <div id="sellBox"></div>
+   <button class="btn" style="margin-top:8px;background:#b45309" onclick="doSell()">✔ 確認賣出（更新持倉＋資金進待分配池）</button>
+   <div style="font-weight:700;font-size:13px;margin-top:18px;color:#1d4ed8">STEP 2｜分配待投資資金</div>
+   <label style="margin-top:6px">待分配資金（賣出後自動帶入，也可手動改）${inp("pool",S.pool)}</label>
+   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+    <button class="btn2" onclick="preset('plan')">計畫：100% 0050</button>
+    <button class="btn2" onclick="preset('5050')">50% 0050＋50% 00631L</button>
+    <button class="btn2" onclick="preset('685')">50% 0050＋50% 00685L</button>
+    <button class="btn2" style="border-color:#047857;color:#047857" onclick="preset('neutral')">⚖ 曝險自動最佳</button>
+   </div>
+   <div id="allocBox"></div>
+   <button class="btn" style="margin-top:8px" onclick="doBuy()">✔ 確認買入（自動更新股數與均攤成本）</button>
+   <button class="btn2" style="margin-top:6px;width:100%" onclick="undoTrade()">↩ 復原上一步</button>
+   <div style="font-weight:700;font-size:13px;margin-top:18px">📒 交易紀錄</div>
+   <div id="tradeBox"></div>`),
   sec("s7","⑦ 定期定額0050（薪資投入）",false,`
    <label>每月定期定額（元）${inp("dcaMonthly",S.dcaMonthly,1000)}</label>
    <div id="dcaBox"></div>`),
@@ -625,6 +735,44 @@ function renderOut(){
  const mkSwap=(cur,base,sn,bn)=>{const p=cur/base-1;return {p,good:p>0.015,txt:p>0.015?`✅ ${sn}相對貴 ${pc(p)} → 今天適合賣${sn}換${bn}`:`— 偏差 ${pc(p)}，未達+1.5%，再等`,cur};};
  const sw=[["00981A → 0050",mkSwap(px("00981A")/px("0050"),S.base981,"00981A","0050")],["00631L → 00685L",mkSwap(px("00631L")/px("00685L"),S.base631,"00631L","00685L")]];
  document.getElementById("swapBox").innerHTML=sw.map(s=>`<div class="msg ${s[1].good?"ok":""}" style="${s[1].good?"":"background:#fafaf9;color:#57534e;font-weight:400"}"><div style="display:flex;justify-content:space-between"><b>${s[0]}</b><span class="mono">現匯率 ${s[1].cur.toFixed(4)}</span></div><div class="small">${s[1].txt}</div></div>`).join("");
+ // 資金調度器
+ (function(){
+  const sb=document.getElementById("sellBox");if(!sb)return;
+  const s=sellCalc();
+  sb.innerHTML=s.h?`<div class="g2" style="margin-top:8px">
+   <div class="card"><div class="l">成交金額</div><div class="v">${fmt(s.gross)}</div><div class="small">持有 ${fmt(s.h.shares)}股｜均攤 ${s.h.cost}</div></div>
+   <div class="card"><div class="l">手續費＋證交稅${isETF(S.sellCode)?"(ETF 0.1%)":"(股票 0.3%)"}</div><div class="v pr">${fmt(s.fee+s.tax)}</div></div>
+   <div class="card"><div class="l">實收金額</div><div class="v pg">${fmt(s.net)}</div></div>
+   <div class="card"><div class="l">實現損益</div><div class="v ${s.real>=0?"pg":"pr"}">${s.real>=0?"+":""}${wan(s.real)}</div><div class="small">${s.costBasis>0?pc(s.real/s.costBasis):""}</div></div></div>`:"";
+  const a=allocCalc(),c=compute();
+  const fr=feeR(),hi=(S.bandTarget+S.tolerance)/100,t=S.bandTarget/100;
+  const r1=(c.E+a.dE)/(c.A-a.fees);
+  const L1=c.L+a.rows.reduce((s2,r)=>s2+(r.beta===2?r.gross:0),0),V1=c.V+a.rows.reduce((s2,r)=>s2+r.gross,0);
+  const xMax=t*c.A-c.E-a.P;
+  const trimNeed=Math.max(0,(c.E+a.dE)-t*(c.A-a.fees));
+  const codes=S.holdings.map(h=>h.code);
+  let html=`<table style="margin-top:10px"><tr><th>標的</th><th>比例%</th><th>參考價</th><th>金額</th><th>可買股數</th></tr>`+
+   a.rows.map(r=>`<tr><td><select style="width:92px;padding:3px" onchange="setAlloc(${r.i},'code',this.value)">${codes.map(cd=>`<option ${cd===r.code?"selected":""}>${cd}</option>`).join("")}</select>${r.beta===2?'<div class="small" style="color:#c2452d">2X槓桿</div>':""}</td>
+    <td><input style="width:56px" value="${r.pct}" onchange="setAlloc(${r.i},'pct',this.value)"></td>
+    <td><input style="width:66px" value="${S.alloc[r.i].price||""}" placeholder="${r.price}" onchange="setAlloc(${r.i},'price',this.value)"></td>
+    <td class="mono">${wan(r.amt)}</td>
+    <td class="mono">${fmt(r.sh)}<div class="small">${Math.floor(r.sh/1000)}張${r.sh%1000?"+"+(r.sh%1000)+"股":""}</div></td></tr>`).join("")+
+   `</table><div class="small">參考價留空＝使用持倉現價；比例合計 <b style="color:${Math.abs(a.sumPct-100)>0.5?"#b91c1c":"#047857"}">${a.sumPct}%</b>｜預估總支出 ${fmt(a.spend)}（手續費 ${fmt(a.fees)}）｜剩餘 ${fmt(a.P-a.spend)}</div>`;
+  html+=`<div class="g2" style="margin-top:10px">
+   <div class="card"><div class="l">曝險比 買前 → 買後</div><div class="v" style="color:${r1>hi?"#b91c1c":"#047857"}">${pc(c.ratio)} → ${pc(r1)}</div><div class="small">容忍帶 ${S.bandTarget-S.tolerance}–${S.bandTarget+S.tolerance}%</div></div>
+   <div class="card"><div class="l">正2佔持股 買前 → 買後</div><div class="v" style="color:${L1/V1>0.55?"#b91c1c":"#1c1917"}">${pc(c.levPct)} → ${pc(V1>0?L1/V1:0)}</div><div class="small">上限55%</div></div></div>`;
+  if(a.P>0){
+   if(r1>hi)html+=`<div class="msg bad" style="font-size:12px">⚠ 此配置買後曝險比 ${pc(r1)} 超過上限。要回到目標 ${S.bandTarget}%，之後需另外賣正2換0050約 <b>${wan(trimNeed)}</b>。建議按「⚖ 曝險自動最佳」。</div>`;
+   else html+=`<div class="msg ok" style="font-size:12px">✅ 此配置買後曝險比在容忍帶內。</div>`;
+   html+=`<div class="small">⚖ 曝險中性提示：在不超過目標${S.bandTarget}%的前提下，這筆資金最多可配置 <b>${xMax>0?wan(Math.min(xMax,a.P))+"（"+Math.min(100,Math.floor(xMax/a.P*100))+"%）":"0元（0%）"}</b> 到正2；全轉0050則曝險比維持不變。</div>`;
+  }
+  document.getElementById("allocBox").innerHTML=html;
+  const tr=S.trades||[];
+  const realSum=tr.reduce((s2,x)=>s2+(x.real||0),0);
+  document.getElementById("tradeBox").innerHTML=tr.length===0?`<div class="small">尚無紀錄</div>`:
+   `<div class="small">累計已實現損益：<b class="${realSum>=0?"pg":"pr"}">${realSum>=0?"+":""}${wan(realSum)}</b></div><table style="margin-top:6px"><tr><th>日期</th><th>買賣</th><th>標的</th><th>股數</th><th>價格</th><th>金額</th><th></th></tr>`+
+   tr.map((x,i)=>({x,i})).reverse().map(({x,i})=>`<tr><td class="mono">${x.d.slice(5)}</td><td style="color:${x.t==="買"?"#b91c1c":"#047857"};font-weight:700">${x.t}</td><td>${x.code}</td><td class="mono">${fmt(x.sh)}</td><td class="mono">${x.p}</td><td class="mono">${wan(x.amt)}${x.real!==undefined?`<div class="small ${x.real>=0?"pg":"pr"}">${x.real>=0?"+":""}${wan(x.real)}</div>`:""}</td><td><button class="btn2" style="padding:1px 7px" onclick="delTrade(${i})">×</button></td></tr>`).join("")+`</table>`;
+ })();
  // 定期定額 + 提領
  const gr=S.wGrowth/100;
  const solve=d=>{let a=c.A,y=0;while(a<S.wTarget&&y<60){a=a*(1+gr)+d*12;y++;}return y;};
@@ -689,10 +837,10 @@ function renderOut(){
  // 壓測
  const d=S.stress/100;let sv=0,sl=0;
  S.holdings.forEach(h=>{const b=h.cat==="槓桿"?2:1;const v=Math.max(0,h.shares*h.price*(1+b*d));sv+=v;if(h.cat==="槓桿")sl+=v;});
- let sE=2*sl+(sv-sl),sA=sv+S.investCash;
+ let sE=2*sl+(sv-sl),sA=sv+S.investCash+(S.pool||0);
  if(S.houseInDenom)sA+=c.hEq; if(S.houseExposure)sE+=c.hEq;
  const sRatio=sA>0?sE/sA:0,[sbl,sbc]=badge(sRatio);
- const sNet=sv+S.investCash+S.survivalFund+S.houseValue-c.mort-c.credit;
+ const sNet=sv+S.investCash+(S.pool||0)+S.survivalFund+S.houseValue-c.mort-c.credit;
  const sCol=S.pledgeCol*(1+d),maint=S.pledgeLoan>0?sCol/S.pledgeLoan:null;
  const stEl=document.getElementById("stressBox");
  if(stEl){document.getElementById("stLabel").textContent=S.stress+"%";
